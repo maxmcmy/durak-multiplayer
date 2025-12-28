@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Durak Multiplayer</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .lobby-container, .game-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 30px;
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .lobby-container {
+            max-width: 500px;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+
+        h2 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 12px 20px;
+            font-size: 1.1em;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            margin-bottom: 10px;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .room-code-display {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin: 20px 0;
+            font-size: 2em;
+            font-weight: bold;
+            letter-spacing: 3px;
+        }
+
+        .waiting-message {
+            color: #666;
+            font-style: italic;
+            margin: 20px 0;
+        }
+
+        .players-list {
+            background: #f0f0f0;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+
+        .player-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 8px;
+        }
+
+        .player-status {
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+
+        .player-status.ready {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .player-status.waiting {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .game-header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .game-info {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .info-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-weight: bold;
+        }
+
+        .player-area {
+            background: #f0f0f0;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 10px 0;
+            min-height: 150px;
+        }
+
+        .player-name {
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 1.2em;
+        }
+
+        .player-name.current-turn {
+            color: #667eea;
+        }
+
+        .cards-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            min-height: 80px;
+        }
+
+        .card {
+            width: 70px;
+            height: 100px;
+            background: white;
+            border: 2px solid #333;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .card.red {
+            color: red;
+        }
+
+        .card.black {
+            color: black;
+        }
+
+        .card.selected {
+            border: 3px solid #667eea;
+            background: #f0f0ff;
+        }
+
+        .card.back {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 1em;
+        }
+
+        .card.trump-card {
+            transform: rotate(90deg);
+            margin: 0 20px;
+        }
+
+        .battlefield {
+            background: #e8e8e8;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            min-height: 200px;
+        }
+
+        .battlefield-title {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .attack-defend-pairs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        .card-pair {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .deck-area {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .deck {
+            width: 70px;
+            height: 100px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: 2px solid #333;
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-weight: bold;
+            position: relative;
+        }
+
+        .deck::before {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: 2px solid #333;
+            border-radius: 8px;
+            top: -3px;
+            left: -3px;
+            z-index: -1;
+        }
+
+        .deck::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: 2px solid #333;
+            border-radius: 8px;
+            top: -6px;
+            left: -6px;
+            z-index: -2;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        button:hover:not(:disabled) {
+            transform: scale(1.05);
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .message {
+            text-align: center;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 10px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .message.info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .chat-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 300px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+            display: none;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px;
+            border-radius: 10px 10px 0 0;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .chat-messages {
+            height: 200px;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .chat-message {
+            margin-bottom: 10px;
+        }
+
+        .chat-message .author {
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .chat-input {
+            display: flex;
+            padding: 10px;
+            border-top: 1px solid #ddd;
+        }
+
+        .chat-input input {
+            flex: 1;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin-right: 5px;
+        }
+
+        .chat-input button {
+            padding: 5px 15px;
+            font-size: 0.9em;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.8em;
+            }
+
+            .card {
+                width: 50px;
+                height: 70px;
+                font-size: 1.2em;
+            }
+
+            .deck {
+                width: 50px;
+                height: 70px;
+            }
+
+            button {
+                padding: 10px 20px;
+                font-size: 1em;
+            }
+
+            .chat-container {
+                width: 250px;
+                bottom: 10px;
+                right: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Lobby Screen -->
+    <div id="lobbyScreen" class="lobby-container">
+        <h1>🃏 Durak Multiplayer 🃏</h1>
+        
+        <div id="nameEntry">
+            <div class="input-group">
+                <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+            </div>
+            <button onclick="setPlayerName()">Continue</button>
+        </div>
+        
+        <div id="roomOptions" class="hidden">
+            <h2>Welcome, <span id="displayName"></span>!</h2>
+            
+            <div style="margin: 30px 0;">
+                <button onclick="createRoom()">Create New Room</button>
+            </div>
+            
+            <div style="margin: 20px 0;">
+                <p style="color: #666;">OR</p>
+            </div>
+            
+            <div class="input-group">
+                <input type="text" id="roomCode" placeholder="Enter room code" maxlength="6" style="text-transform: uppercase;">
+                <button onclick="joinRoom()">Join Room</button>
+            </div>
+        </div>
+        
+        <div id="waitingRoom" class="hidden">
+            <h2>Room Code</h2>
+            <div class="room-code-display" id="roomCodeDisplay">ABCD12</div>
+            <p class="waiting-message">Share this code with your friend to start playing!</p>
+            
+            <div class="players-list">
+                <h3>Players</h3>
+                <div id="playersList"></div>
+            </div>
+            
+            <button id="readyBtn" onclick="playerReady()">Ready to Start</button>
+            <button onclick="leaveRoom()" style="background: #dc3545;">Leave Room</button>
+        </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="gameScreen" class="game-container hidden">
+        <div class="game-header">
+            <h1>🃏 Durak Multiplayer 🃏</h1>
+            <div id="gameMessage" class="message info">Waiting for game to start...</div>
+        </div>
+
+        <div class="game-info">
+            <div class="info-box">
+                Room: <span id="gameRoomCode">-</span>
+            </div>
+            <div class="info-box">
+                Trump: <span id="trumpSuit">-</span>
+            </div>
+            <div class="info-box">
+                Deck: <span id="deckCount">36</span>
+            </div>
+        </div>
+
+        <div id="opponentArea" class="player-area">
+            <div id="opponentName" class="player-name">Opponent</div>
+            <div id="opponentCards" class="cards-container"></div>
+        </div>
+
+        <div class="battlefield">
+            <div class="battlefield-title">Battlefield</div>
+            <div id="battlefield" class="attack-defend-pairs"></div>
+        </div>
+
+        <div class="deck-area">
+            <div class="deck" id="deckPile">
+                <span id="deckDisplay">36</span>
+            </div>
+            <div id="trumpCard" class="card trump-card" style="display: none;"></div>
+        </div>
+
+        <div id="playerArea" class="player-area">
+            <div id="playerNameDisplay" class="player-name">You</div>
+            <div id="playerCards" class="cards-container"></div>
+        </div>
+
+        <div class="controls">
+            <button id="passBtn" onclick="pass()" disabled>Pass</button>
+            <button id="takeBtn" onclick="takeCards()" disabled>Take Cards</button>
+            <button id="endAttackBtn" onclick="endAttack()" disabled>End Attack</button>
+            <button onclick="leaveGame()" style="background: #dc3545;">Leave Game</button>
+        </div>
+    </div>
+
+    <!-- Chat -->
+    <div id="chatContainer" class="chat-container">
+        <div class="chat-header" onclick="toggleChat()">
+            💬 Chat
+        </div>
+        <div id="chatBody">
+            <div id="chatMessages" class="chat-messages"></div>
+            <div class="chat-input">
+                <input type="text" id="chatInput" placeholder="Type a message..." maxlength="100">
+                <button onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Socket connection
+        let socket = null;
+        
+        // Game state
+        let playerInfo = {
+            name: '',
+            id: null
+        };
+        let roomInfo = {
+            code: null,
+            players: []
+        };
+        let gameState = null;
+        let selectedCard = null;
+        let myHand = [];
+        
+        // Connect to server
+        function connectToServer() {
+            // Try to connect to the server
+            // If running locally, use localhost:3000
+            // If deployed, use the actual server URL
+            const serverUrl = window.location.hostname === 'localhost' 
+                ? 'http://localhost:3000' 
+                : window.location.origin;
+            
+            socket = io(serverUrl);
+            
+            // Socket event handlers
+            socket.on('connect', () => {
+                console.log('Connected to server');
+                playerInfo.id = socket.id;
+            });
+            
+            socket.on('roomCreated', (data) => {
+                roomInfo.code = data.roomCode;
+                gameState = data.gameState;
+                document.getElementById('roomCodeDisplay').textContent = data.roomCode;
+                showWaitingRoom();
+                updatePlayersList();
+            });
+            
+            socket.on('playerJoined', (data) => {
+                gameState = data.gameState;
+                updatePlayersList();
+                showMessage('A player joined the room!', 'info');
+            });
+            
+            socket.on('error', (data) => {
+                alert(data.message);
+            });
+            
+            socket.on('playerReadyUpdate', (data) => {
+                updatePlayersList();
+            });
+            
+            socket.on('gameStarted', (data) => {
+                gameState = data.gameState;
+                startGame();
+            });
+            
+            socket.on('cardPlayed', (data) => {
+                gameState = data.gameState;
+                updateGameDisplay();
+                
+                if (data.action === 'attack') {
+                    showMessage('Card played for attack!', 'info');
+                } else {
+                    showMessage('Card played for defense!', 'info');
+                }
+            });
+            
+            socket.on('cardsTaken', (data) => {
+                gameState = data.gameState;
+                updateGameDisplay();
+                showMessage('Cards taken!', 'info');
+            });
+            
+            socket.on('passed', (data) => {
+                gameState = data.gameState;
+                updateGameDisplay();
+                showMessage('Defense successful! Roles switched.', 'info');
+            });
+            
+            socket.on('attackEnded', (data) => {
+                gameState = data.gameState;
+                updateGameDisplay();
+                showMessage('Attack ended! Roles switched.', 'info');
+            });
+            
+            socket.on('gameOver', (data) => {
+                if (data.winner === socket.id) {
+                    showMessage('🎉 You WIN! Your opponent is the Durak! 🎉', 'success');
+                } else {
+                    showMessage('😔 You are the Durak! Better luck next time! 😔', 'error');
+                }
+                setTimeout(() => {
+                    leaveGame();
+                }, 5000);
+            });
+            
+            socket.on('gameDraw', () => {
+                showMessage('Game ended in a draw!', 'info');
+                setTimeout(() => {
+                    leaveGame();
+                }, 5000);
+            });
+            
+            socket.on('newMessage', (data) => {
+                addChatMessage(data.playerName, data.message);
+            });
+            
+            socket.on('playerDisconnected', (data) => {
+                showMessage(`${data.playerName} disconnected`, 'error');
+            });
+            
+            socket.on('playerReconnected', (data) => {
+                showMessage(`${data.playerName} reconnected`, 'info');
+            });
+        }
+        
+        // UI Functions
+        function setPlayerName() {
+            const nameInput = document.getElementById('playerName');
+            const name = nameInput.value.trim();
+            
+            if (name.length < 1) {
+                alert('Please enter your name');
+                return;
+            }
+            
+            playerInfo.name = name;
+            document.getElementById('displayName').textContent = name;
+            document.getElementById('nameEntry').classList.add('hidden');
+            document.getElementById('roomOptions').classList.remove('hidden');
+            
+            // Connect to server after name is set
+            connectToServer();
+        }
+        
+        function createRoom() {
+            if (!socket) return;
+            
+            socket.emit('createRoom', {
+                playerName: playerInfo.name
+            });
+        }
+        
+        function joinRoom() {
+            if (!socket) return;
+            
+            const roomCode = document.getElementById('roomCode').value.trim().toUpperCase();
+            
+            if (roomCode.length < 1) {
+                alert('Please enter a room code');
+                return;
+            }
+            
+            socket.emit('joinRoom', {
+                roomCode: roomCode,
+                playerName: playerInfo.name
+            });
+            
+            roomInfo.code = roomCode;
+            document.getElementById('roomCodeDisplay').textContent = roomCode;
+            showWaitingRoom();
+        }
+        
+        function showWaitingRoom() {
+            document.getElementById('roomOptions').classList.add('hidden');
+            document.getElementById('waitingRoom').classList.remove('hidden');
+        }
+        
+        function updatePlayersList() {
+            if (!gameState) return;
+            
+            const playersList = document.getElementById('playersList');
+            playersList.innerHTML = '';
+            
+            gameState.players.forEach(player => {
+                const playerDiv = document.createElement('div');
+                playerDiv.className = 'player-item';
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = player.name + (player.id === socket.id ? ' (You)' : '');
+                
+                const statusSpan = document.createElement('span');
+                statusSpan.className = `player-status ${player.ready ? 'ready' : 'waiting'}`;
+                statusSpan.textContent = player.ready ? 'Ready' : 'Waiting';
+                
+                playerDiv.appendChild(nameSpan);
+                playerDiv.appendChild(statusSpan);
+                playersList.appendChild(playerDiv);
+            });
+        }
+        
+        function playerReady() {
+            if (!socket) return;
+            
+            socket.emit('playerReady');
+            document.getElementById('readyBtn').disabled = true;
+            document.getElementById('readyBtn').textContent = 'Waiting for opponent...';
+        }
+        
+        function leaveRoom() {
+            location.reload();
+        }
+        
+        function leaveGame() {
+            location.reload();
+        }
+        
+        function startGame() {
+            document.getElementById('lobbyScreen').classList.add('hidden');
+            document.getElementById('gameScreen').classList.remove('hidden');
+            document.getElementById('chatContainer').style.display = 'block';
+            document.getElementById('gameRoomCode').textContent = roomInfo.code;
+            
+            updateGameDisplay();
+            showMessage('Game started! Good luck!', 'success');
+        }
+        
+        function updateGameDisplay() {
+            if (!gameState) return;
+            
+            // Find myself and opponent
+            const me = gameState.players.find(p => p.id === socket.id);
+            const opponent = gameState.players.find(p => p.id !== socket.id);
+            
+            if (!me || !opponent) return;
+            
+            myHand = me.hand || [];
+            
+            // Update names
+            document.getElementById('playerNameDisplay').textContent = me.name + ' (You)';
+            document.getElementById('opponentName').textContent = opponent.name;
+            
+            // Update turn indicators
+            if (gameState.currentAttacker === socket.id) {
+                document.getElementById('playerNameDisplay').classList.add('current-turn');
+                document.getElementById('opponentName').classList.remove('current-turn');
+                if (gameState.gamePhase === 'attacking') {
+                    showMessage('Your turn to attack!', 'info');
+                }
+            } else if (gameState.currentDefender === socket.id) {
+                document.getElementById('playerNameDisplay').classList.add('current-turn');
+                document.getElementById('opponentName').classList.remove('current-turn');
+                if (gameState.gamePhase === 'defending') {
+                    showMessage('Defend against the attack!', 'info');
+                }
+            } else {
+                document.getElementById('playerNameDisplay').classList.remove('current-turn');
+                document.getElementById('opponentName').classList.add('current-turn');
+            }
+            
+            // Update game info
+            document.getElementById('trumpSuit').textContent = gameState.trumpSuit || '-';
+            document.getElementById('deckCount').textContent = gameState.deckCount;
+            document.getElementById('deckDisplay').textContent = gameState.deckCount;
+            
+            // Update trump card display
+            if (gameState.deckCount > 0 && gameState.trumpCard) {
+                const trumpCardEl = document.getElementById('trumpCard');
+                trumpCardEl.style.display = 'block';
+                trumpCardEl.innerHTML = `
+                    <div>${gameState.trumpCard.rank}</div>
+                    <div>${gameState.trumpCard.suit}</div>
+                `;
+                trumpCardEl.className = `card trump-card ${(gameState.trumpCard.suit === '♥' || gameState.trumpCard.suit === '♦') ? 'red' : 'black'}`;
+            } else {
+                document.getElementById('trumpCard').style.display = 'none';
+            }
+            
+            // Update my cards
+            const playerCardsEl = document.getElementById('playerCards');
+            playerCardsEl.innerHTML = '';
+            
+            if (myHand) {
+                myHand.sort((a, b) => {
+                    if (a.isTrump !== b.isTrump) return a.isTrump ? 1 : -1;
+                    if (a.suit !== b.suit) return a.suit.localeCompare(b.suit);
+                    return a.value - b.value;
+                }).forEach((card, index) => {
+                    const cardEl = document.createElement('div');
+                    cardEl.className = `card ${(card.suit === '♥' || card.suit === '♦') ? 'red' : 'black'}`;
+                    if (selectedCard === index) {
+                        cardEl.classList.add('selected');
+                    }
+                    cardEl.innerHTML = `
+                        <div>${card.rank}</div>
+                        <div>${card.suit}</div>
+                        ${card.isTrump ? '<small>Trump</small>' : ''}
+                    `;
+                    cardEl.onclick = () => selectCard(index);
+                    playerCardsEl.appendChild(cardEl);
+                });
+            }
+            
+            // Update opponent cards (hidden)
+            const opponentCardsEl = document.getElementById('opponentCards');
+            opponentCardsEl.innerHTML = '';
+            for (let i = 0; i < opponent.cardCount; i++) {
+                const cardEl = document.createElement('div');
+                cardEl.className = 'card back';
+                cardEl.innerHTML = '🃏';
+                opponentCardsEl.appendChild(cardEl);
+            }
+            
+            // Update battlefield
+            const battlefieldEl = document.getElementById('battlefield');
+            battlefieldEl.innerHTML = '';
+            
+            if (gameState.battlefield) {
+                gameState.battlefield.forEach(pair => {
+                    const pairEl = document.createElement('div');
+                    pairEl.className = 'card-pair';
+                    
+                    // Attack card
+                    const attackEl = document.createElement('div');
+                    attackEl.className = `card ${(pair.attack.suit === '♥' || pair.attack.suit === '♦') ? 'red' : 'black'}`;
+                    attackEl.innerHTML = `
+                        <div>${pair.attack.rank}</div>
+                        <div>${pair.attack.suit}</div>
+                    `;
+                    pairEl.appendChild(attackEl);
+                    
+                    // Defense card (if exists)
+                    if (pair.defense) {
+                        const defenseEl = document.createElement('div');
+                        defenseEl.className = `card ${(pair.defense.suit === '♥' || pair.defense.suit === '♦') ? 'red' : 'black'}`;
+                        defenseEl.innerHTML = `
+                            <div>${pair.defense.rank}</div>
+                            <div>${pair.defense.suit}</div>
+                        `;
+                        pairEl.appendChild(defenseEl);
+                    }
+                    
+                    battlefieldEl.appendChild(pairEl);
+                });
+            }
+            
+            updateButtonStates();
+        }
+        
+        function selectCard(index) {
+            if (gameState.gameState !== 'playing') return;
+            
+            selectedCard = index;
+            updateGameDisplay();
+            
+            // Auto-play the card
+            if (gameState.currentAttacker === socket.id && gameState.gamePhase === 'attacking') {
+                socket.emit('playCard', { cardIndex: index });
+                selectedCard = null;
+            } else if (gameState.currentDefender === socket.id && gameState.gamePhase === 'defending') {
+                socket.emit('playCard', { cardIndex: index });
+                selectedCard = null;
+            }
+        }
+        
+        function pass() {
+            if (!socket) return;
+            socket.emit('pass');
+        }
+        
+        function takeCards() {
+            if (!socket) return;
+            socket.emit('takeCards');
+        }
+        
+        function endAttack() {
+            if (!socket) return;
+            socket.emit('endAttack');
+        }
+        
+        function updateButtonStates() {
+            const passBtn = document.getElementById('passBtn');
+            const takeBtn = document.getElementById('takeBtn');
+            const endAttackBtn = document.getElementById('endAttackBtn');
+            
+            passBtn.disabled = true;
+            takeBtn.disabled = true;
+            endAttackBtn.disabled = true;
+            
+            if (!gameState || gameState.gameState !== 'playing') return;
+            
+            if (gameState.currentDefender === socket.id && gameState.gamePhase === 'defending') {
+                if (gameState.battlefield && gameState.battlefield.every(pair => pair.defense)) {
+                    passBtn.disabled = false;
+                } else {
+                    takeBtn.disabled = false;
+                }
+            }
+            
+            if (gameState.currentAttacker === socket.id && gameState.gamePhase === 'attacking' && 
+                gameState.battlefield && gameState.battlefield.length > 0) {
+                endAttackBtn.disabled = false;
+            }
+        }
+        
+        function showMessage(text, type) {
+            const messageEl = document.getElementById('gameMessage');
+            messageEl.textContent = text;
+            messageEl.className = `message ${type}`;
+        }
+        
+        // Chat functions
+        function toggleChat() {
+            const chatBody = document.getElementById('chatBody');
+            chatBody.style.display = chatBody.style.display === 'none' ? 'block' : 'none';
+        }
+        
+        function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const message = input.value.trim();
+            
+            if (message && socket) {
+                socket.emit('sendMessage', { message: message });
+                input.value = '';
+            }
+        }
+        
+        function addChatMessage(author, message) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'chat-message';
+            messageDiv.innerHTML = `<span class="author">${author}:</span> ${message}`;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        // Enter key for chat
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('chatInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+            
+            document.getElementById('playerName').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    setPlayerName();
+                }
+            });
+            
+            document.getElementById('roomCode').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    joinRoom();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
