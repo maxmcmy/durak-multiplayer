@@ -423,12 +423,36 @@
             gap: 10px;
             justify-content: center;
             min-height: 100px;
+            padding: 10px;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .battlefield.clickable {
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .battlefield.clickable:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.02);
         }
 
         .card-pair {
             display: flex;
             flex-direction: column;
             gap: 5px;
+            position: relative;
+        }
+        
+        .card-pair.can-defend .card:first-child {
+            cursor: pointer;
+            border: 2px solid #ffc107;
+        }
+        
+        .card-pair.can-defend:hover .card:first-child {
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(255, 193, 7, 0.5);
         }
 
         .deck-area {
@@ -1528,9 +1552,19 @@
             battlefieldEl.innerHTML = '';
             
             if (gameState.battlefield) {
-                gameState.battlefield.forEach(pair => {
+                gameState.battlefield.forEach((pair, pairIndex) => {
                     const pairEl = document.createElement('div');
                     pairEl.className = 'card-pair';
+                    
+                    // Check if this attack can be defended (no defense yet and player is defender with card selected)
+                    const canDefendThis = !pair.defense && 
+                                          gameState.currentDefenderId === socket.id && 
+                                          gameState.gamePhase === 'defending' &&
+                                          selectedCard !== null;
+                    
+                    if (canDefendThis) {
+                        pairEl.classList.add('can-defend');
+                    }
                     
                     const attackEl = document.createElement('div');
                     attackEl.className = `card ${(pair.attack.suit === '♥' || pair.attack.suit === '♦') ? 'red' : 'black'}`;
@@ -1538,6 +1572,13 @@
                         <div style="font-size: 0.8em">${pair.attack.rank}</div>
                         <div>${pair.attack.suit}</div>
                     `;
+                    
+                    // Make attack card clickable if it can be defended
+                    if (canDefendThis) {
+                        attackEl.style.cursor = 'pointer';
+                        attackEl.onclick = () => playSelectedCard(pairIndex);
+                    }
+                    
                     pairEl.appendChild(attackEl);
                     
                     if (pair.defense) {
@@ -1552,6 +1593,18 @@
                     
                     battlefieldEl.appendChild(pairEl);
                 });
+            }
+            
+            // Make battlefield clickable for attacks when appropriate
+            if (selectedCard !== null && 
+                (gameState.initialAttackerId === socket.id || 
+                 (gameState.additionalAttackers && gameState.additionalAttackers.includes(socket.id))) &&
+                (gameState.gamePhase === 'attacking' || gameState.gamePhase === 'defending')) {
+                battlefieldEl.classList.add('clickable');
+                battlefieldEl.onclick = () => playSelectedCard();
+            } else {
+                battlefieldEl.classList.remove('clickable');
+                battlefieldEl.onclick = null;
             }
         }
         
@@ -1652,20 +1705,54 @@
         function selectCard(index) {
             if (isSpectator || gameState.gameState !== 'playing') return;
             
-            selectedCard = index;
+            // If we already have a card selected and clicking the same one, deselect it
+            if (selectedCard === index) {
+                selectedCard = null;
+                updateGameDisplay();
+                return;
+            }
             
-            if (deflectMode && gameState.currentDefenderId === socket.id && gameState.gamePhase === 'defending') {
-                socket.emit('deflectAttack', { cardIndex: index });
-                selectedCard = null;
-                deflectMode = false;
+            selectedCard = index;
+            updateGameDisplay();
+            
+            // Show hint about what to do next
+            if (gameState.currentDefenderId === socket.id && gameState.gamePhase === 'defending') {
+                if (deflectMode) {
+                    // Try deflecting immediately
+                    socket.emit('deflectAttack', { cardIndex: index });
+                    selectedCard = null;
+                    deflectMode = false;
+                } else {
+                    showMessage('Click on an attack card to defend against it', 'info');
+                }
             } else if ((gameState.initialAttackerId === socket.id || 
-                       (gameState.additionalAttackers && gameState.additionalAttackers.includes(socket.id))) 
-                      && (gameState.gamePhase === 'attacking' || gameState.gamePhase === 'defending' || gameState.gamePhase === 'throwIn')) {
-                // Attackers can now play during both attacking AND defending phases
-                socket.emit('playCard', { cardIndex: index });
+                       (gameState.additionalAttackers && gameState.additionalAttackers.includes(socket.id)))) {
+                if (gameState.gamePhase === 'throwIn') {
+                    // For throw-in, play immediately
+                    socket.emit('playCard', { cardIndex: index });
+                    selectedCard = null;
+                } else {
+                    showMessage('Click the battlefield to play this card', 'info');
+                }
+            }
+        }
+        
+        function playSelectedCard(targetIndex = null) {
+            if (selectedCard === null || isSpectator || gameState.gameState !== 'playing') return;
+            
+            // Defending against specific attack
+            if (gameState.currentDefenderId === socket.id && gameState.gamePhase === 'defending' && targetIndex !== null) {
+                socket.emit('defendCard', { 
+                    cardIndex: selectedCard, 
+                    targetIndex: targetIndex 
+                });
                 selectedCard = null;
-            } else if (gameState.currentDefenderId === socket.id && gameState.gamePhase === 'defending') {
-                socket.emit('playCard', { cardIndex: index });
+            }
+            // Playing an attack card
+            else if ((gameState.initialAttackerId === socket.id || 
+                     (gameState.additionalAttackers && gameState.additionalAttackers.includes(socket.id))) 
+                    && (gameState.gamePhase === 'attacking' || gameState.gamePhase === 'defending')) {
+                socket.emit('playCard', { cardIndex: selectedCard });
                 selectedCard = null;
             }
             
