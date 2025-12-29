@@ -1556,12 +1556,8 @@
         function toggleDeflectMode() {
             if (isSpectator) return;
             deflectMode = !deflectMode;
-            const btn = document.getElementById('deflectBtn');
             if (deflectMode) {
-                btn.textContent = 'Cancel';
                 showMessage('Click a card with the same rank to deflect!', 'info');
-            } else {
-                btn.textContent = 'Deflect';
             }
             updateGameDisplay();
         }
