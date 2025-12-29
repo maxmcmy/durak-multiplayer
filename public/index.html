@@ -339,6 +339,66 @@
             color: #0c5460;
         }
 
+        .throw-in-timer {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            z-index: 1000;
+            min-width: 300px;
+        }
+
+        .throw-in-timer h2 {
+            color: white;
+            margin-bottom: 20px;
+        }
+
+        .timer-display {
+            font-size: 3em;
+            font-weight: bold;
+            color: #ff6b6b;
+            margin: 20px 0;
+        }
+
+        .valid-ranks {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+
+        .valid-rank {
+            background: #667eea;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+
+        .throw-in-cards {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .throw-in-info {
+            background: #fff3cd;
+            color: #856404;
+            padding: 10px;
+            border-radius: 10px;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
         .chat-container {
             position: fixed;
             bottom: 20px;
@@ -519,6 +579,17 @@
         </div>
     </div>
 
+    <!-- Throw-In Timer -->
+    <div id="throwInTimer" class="throw-in-timer hidden">
+        <h2>Opponent is taking cards!</h2>
+        <div class="timer-display" id="timerDisplay">3</div>
+        <div>You can throw in cards with these ranks:</div>
+        <div id="validRanks" class="valid-ranks"></div>
+        <div id="throwInCards" class="throw-in-cards"></div>
+        <button onclick="finishThrowIn()">Done Adding Cards</button>
+        <div class="throw-in-info">Cards will be added automatically when timer ends</div>
+    </div>
+
     <!-- Chat -->
     <div id="chatContainer" class="chat-container">
         <div class="chat-header" onclick="toggleChat()">
@@ -549,6 +620,7 @@
         let gameState = null;
         let selectedCard = null;
         let myHand = [];
+        let throwInInterval = null;
         
         // Connect to server
         function connectToServer() {
@@ -605,10 +677,32 @@
                 }
             });
             
-            socket.on('cardsTaken', (data) => {
+            socket.on('throwInPhase', (data) => {
                 gameState = data.gameState;
                 updateGameDisplay();
-                showMessage('Cards taken!', 'info');
+                
+                if (gameState.currentAttacker === socket.id) {
+                    // Attacker can throw in cards
+                    showThrowInTimer(true, data.validRanks);
+                    showMessage('Opponent is taking cards! You can add more cards with the same ranks!', 'info');
+                } else {
+                    // Defender sees timer
+                    showThrowInTimer(false, data.validRanks);
+                    showMessage('Taking cards... Opponent can add more cards!', 'error');
+                }
+            });
+            
+            socket.on('throwInCard', (data) => {
+                gameState = data.gameState;
+                updateGameDisplay();
+                updateThrowInDisplay(data.card);
+            });
+            
+            socket.on('cardsTaken', (data) => {
+                gameState = data.gameState;
+                hideThrowInTimer();
+                updateGameDisplay();
+                showMessage(`Cards taken! (${data.totalCards} total)`, 'info');
             });
             
             socket.on('passed', (data) => {
@@ -883,10 +977,31 @@
                 });
             }
             
+            // Show throw-in cards on battlefield during throw-in phase
+            if (gameState.gamePhase === 'throwIn' && gameState.throwInCards && gameState.throwInCards.length > 0) {
+                const throwInDiv = document.createElement('div');
+                throwInDiv.className = 'throw-in-info';
+                throwInDiv.textContent = 'Additional cards being thrown in:';
+                battlefieldEl.appendChild(throwInDiv);
+                
+                const throwInCardsDiv = document.createElement('div');
+                throwInCardsDiv.className = 'attack-defend-pairs';
+                gameState.throwInCards.forEach(card => {
+                    const cardEl = document.createElement('div');
+                    cardEl.className = `card ${(card.suit === '♥' || card.suit === '♦') ? 'red' : 'black'}`;
+                    cardEl.innerHTML = `
+                        <div>${card.rank}</div>
+                        <div>${card.suit}</div>
+                    `;
+                    throwInCardsDiv.appendChild(cardEl);
+                });
+                battlefieldEl.appendChild(throwInCardsDiv);
+            }
+            
             updateButtonStates();
         }
         
-        // FIXED selectCard function - now takes original index
+        // FIXED selectCard function - now takes original index and handles throw-in
         function selectCard(originalIndex, displayIndex) {
             if (gameState.gameState !== 'playing') return;
             
@@ -898,6 +1013,10 @@
                 socket.emit('playCard', { cardIndex: originalIndex });
                 selectedCard = null;
             } else if (gameState.currentDefender === socket.id && gameState.gamePhase === 'defending') {
+                socket.emit('playCard', { cardIndex: originalIndex });
+                selectedCard = null;
+            } else if (gameState.currentAttacker === socket.id && gameState.gamePhase === 'throwIn') {
+                // Throw in during the taking phase
                 socket.emit('playCard', { cardIndex: originalIndex });
                 selectedCard = null;
             }
@@ -929,6 +1048,11 @@
             
             if (!gameState || gameState.gameState !== 'playing') return;
             
+            // During throw-in phase, disable all buttons
+            if (gameState.gamePhase === 'throwIn') {
+                return;
+            }
+            
             if (gameState.currentDefender === socket.id && gameState.gamePhase === 'defending') {
                 if (gameState.battlefield && gameState.battlefield.every(pair => pair.defense)) {
                     passBtn.disabled = false;
@@ -947,6 +1071,71 @@
             const messageEl = document.getElementById('gameMessage');
             messageEl.textContent = text;
             messageEl.className = `message ${type}`;
+        }
+        
+        // Throw-in timer functions
+        function showThrowInTimer(canThrowIn, validRanks) {
+            const timerDiv = document.getElementById('throwInTimer');
+            timerDiv.classList.remove('hidden');
+            
+            // Display valid ranks
+            const ranksDiv = document.getElementById('validRanks');
+            ranksDiv.innerHTML = '';
+            validRanks.forEach(rank => {
+                const rankEl = document.createElement('div');
+                rankEl.className = 'valid-rank';
+                rankEl.textContent = rank;
+                ranksDiv.appendChild(rankEl);
+            });
+            
+            // Clear throw-in cards display
+            document.getElementById('throwInCards').innerHTML = '';
+            
+            // Show/hide done button based on role
+            const doneBtn = timerDiv.querySelector('button');
+            doneBtn.style.display = canThrowIn ? 'block' : 'none';
+            
+            // Start countdown
+            let timeLeft = 3;
+            const timerDisplay = document.getElementById('timerDisplay');
+            timerDisplay.textContent = timeLeft;
+            
+            if (throwInInterval) clearInterval(throwInInterval);
+            throwInInterval = setInterval(() => {
+                timeLeft--;
+                timerDisplay.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                    clearInterval(throwInInterval);
+                    hideThrowInTimer();
+                }
+            }, 1000);
+        }
+        
+        function hideThrowInTimer() {
+            const timerDiv = document.getElementById('throwInTimer');
+            timerDiv.classList.add('hidden');
+            
+            if (throwInInterval) {
+                clearInterval(throwInInterval);
+                throwInInterval = null;
+            }
+        }
+        
+        function updateThrowInDisplay(card) {
+            const throwInCardsDiv = document.getElementById('throwInCards');
+            const cardEl = document.createElement('div');
+            cardEl.className = `card ${(card.suit === '♥' || card.suit === '♦') ? 'red' : 'black'}`;
+            cardEl.innerHTML = `
+                <div>${card.rank}</div>
+                <div>${card.suit}</div>
+            `;
+            throwInCardsDiv.appendChild(cardEl);
+        }
+        
+        function finishThrowIn() {
+            if (!socket || gameState.currentAttacker !== socket.id) return;
+            socket.emit('finishThrowIn');
+            hideThrowInTimer();
         }
         
         // Chat functions
