@@ -36,12 +36,14 @@
             background: radial-gradient(circle at center, #2a5298, #1e3c72);
             border-radius: 20px;
             box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.5);
-            padding: 20px;
+            padding: 10px;
             width: 100%;
-            max-width: 1400px;
-            height: 90vh;
+            max-width: 1600px;
+            height: 95vh;
             position: relative;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
 
         h1 {
@@ -253,55 +255,96 @@
             cursor: not-allowed;
         }
 
-        /* Game Table Layout */
+        /* Game Table Layout - Improved */
         .game-table {
-            width: 100%;
-            height: 100%;
-            position: relative;
+            flex: 1;
             display: flex;
             flex-direction: column;
+            position: relative;
         }
 
         .top-info {
             background: rgba(0, 0, 0, 0.3);
             color: white;
-            padding: 5px;
+            padding: 8px;
             border-radius: 8px;
-            margin-bottom: 5px;
+            margin-bottom: 10px;
             display: flex;
             justify-content: space-around;
             flex-wrap: wrap;
-            position: relative;
-            z-index: 1;
         }
 
         .info-box {
             background: rgba(255, 255, 255, 0.1);
-            padding: 3px 12px;
+            padding: 5px 15px;
             border-radius: 5px;
             margin: 2px;
-            font-size: 0.9em;
+            font-size: 0.95em;
         }
 
-        .players-circle {
+        /* Improved 2-player layout */
+        .game-area {
             flex: 1;
-            position: relative;
             display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-top: 80px;
-            margin-bottom: 100px;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+            padding: 10px;
         }
 
-        .player-slot {
+        /* Opponent area at top */
+        .opponent-area {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 180px;
+        }
+
+        /* Central game area */
+        .central-area {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            padding: 20px;
+            gap: 40px;
+        }
+
+        /* Player's own area at bottom */
+        .player-area {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 200px;
+        }
+
+        /* Multi-player circle layout (3-6 players) */
+        .players-circle {
             position: absolute;
-            width: 160px;
-            background: rgba(255, 255, 255, 0.9);
-            border-radius: 12px;
-            padding: 8px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 80%;
+            display: none;
+        }
+
+        .players-circle.active {
+            display: block;
+        }
+
+        /* Improved player slot design */
+        .player-slot {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 15px;
             box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
             transition: all 0.3s ease;
-            z-index: 2;
+            min-width: 200px;
+        }
+
+        .player-slot.position-circle {
+            position: absolute;
+            width: 200px;
         }
 
         .player-slot.active-attacker {
@@ -334,41 +377,52 @@
         .player-slot.current-player {
             background: linear-gradient(135deg, #f0f0f0 0%, #ffffff 100%);
             border: 3px solid #007bff;
+            transform: scale(1.05);
         }
 
         .player-name {
             font-weight: bold;
-            margin-bottom: 5px;
+            margin-bottom: 10px;
             text-align: center;
+            font-size: 1.1em;
         }
 
         .player-cards {
             display: flex;
             flex-wrap: wrap;
-            gap: 5px;
-            min-height: 60px;
+            gap: 8px;
             justify-content: center;
+            min-height: 80px;
         }
 
+        /* Larger cards for better visibility */
         .card {
-            width: 40px;
-            height: 55px;
+            width: 55px;
+            height: 75px;
             background: white;
-            border: 1px solid #333;
-            border-radius: 5px;
+            border: 2px solid #333;
+            border-radius: 6px;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            font-size: 0.9em;
+            font-size: 1.2em;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.3s ease;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Current player's cards are even larger */
+        .current-player .card {
+            width: 65px;
+            height: 90px;
+            font-size: 1.4em;
         }
 
         .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+            transform: translateY(-8px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
         }
 
         .card.red {
@@ -380,50 +434,46 @@
         }
 
         .card.selected {
-            border: 2px solid #667eea;
+            border: 3px solid #667eea;
             background: #f0f0ff;
+            transform: translateY(-10px);
         }
 
         .card.back {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            font-size: 0.8em;
+            font-size: 1.5em;
         }
 
         .card.deflectable {
-            border: 2px solid #ffd700;
-            box-shadow: 0 0 10px #ffd700;
+            border: 3px solid #ffd700;
+            box-shadow: 0 0 15px #ffd700;
         }
 
-        /* Central Battlefield */
+        /* Improved Battlefield */
         .battlefield-container {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 350px;
-            max-width: 35%;
-            background: rgba(0, 0, 0, 0.5);
+            background: rgba(0, 0, 0, 0.6);
             border-radius: 20px;
-            padding: 15px;
-            z-index: 5;
+            padding: 20px;
+            min-width: 400px;
+            min-height: 200px;
         }
 
         .battlefield-title {
             color: white;
             text-align: center;
             font-weight: bold;
-            margin-bottom: 10px;
-            font-size: 1.1em;
+            margin-bottom: 15px;
+            font-size: 1.2em;
         }
 
         .battlefield {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 15px;
             justify-content: center;
-            min-height: 100px;
-            padding: 10px;
+            min-height: 120px;
+            padding: 15px;
             border-radius: 10px;
             transition: all 0.3s ease;
         }
@@ -441,30 +491,37 @@
         .card-pair {
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: 8px;
             position: relative;
         }
         
         .card-pair.can-defend .card:first-child {
             cursor: pointer;
-            border: 2px solid #ffc107;
+            border: 3px solid #ffc107;
         }
         
         .card-pair.can-defend:hover .card:first-child {
-            transform: scale(1.05);
-            box-shadow: 0 0 15px rgba(255, 193, 7, 0.5);
+            transform: scale(1.1);
+            box-shadow: 0 0 20px rgba(255, 193, 7, 0.5);
         }
 
+        /* Improved Deck Area */
         .deck-area {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .deck-display {
+            display: flex;
+            align-items: center;
+            gap: 20px;
         }
 
         .deck {
-            width: 50px;
-            height: 70px;
+            width: 70px;
+            height: 95px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             border: 2px solid #333;
             border-radius: 8px;
@@ -473,14 +530,13 @@
             align-items: center;
             color: white;
             font-weight: bold;
-            font-size: 1.1em;
-            position: relative;
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+            font-size: 1.5em;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
         }
 
         .trump-card-wrapper {
-            width: 70px;
-            height: 50px;
+            width: 95px;
+            height: 70px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -490,49 +546,49 @@
         .card.trump-card {
             transform: rotate(90deg);
             position: absolute;
+            width: 70px;
+            height: 95px;
         }
 
         /* Bottom Controls */
         .bottom-controls {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
             display: flex;
             gap: 10px;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-            z-index: 10;
+            padding: 10px;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
         }
 
         .bottom-controls button {
-            padding: 8px 20px;
-            font-size: 0.95em;
+            padding: 10px 25px;
+            font-size: 1em;
         }
 
         /* Turn Indicator */
         .turn-indicator {
             position: absolute;
-            top: 10px;
+            top: 60px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(0, 0, 0, 0.9);
             color: white;
-            padding: 8px 20px;
-            border-radius: 10px;
-            font-size: 1.1em;
+            padding: 10px 25px;
+            border-radius: 12px;
+            font-size: 1.2em;
             font-weight: bold;
             text-align: center;
-            min-width: 250px;
+            min-width: 280px;
             z-index: 10;
         }
 
         .turn-indicator.your-turn {
-            background: rgba(40, 167, 69, 0.9);
+            background: rgba(40, 167, 69, 0.95);
             animation: pulse 2s infinite;
         }
 
         .turn-indicator.defend {
-            background: rgba(220, 53, 69, 0.9);
+            background: rgba(220, 53, 69, 0.95);
             animation: pulse 1.5s infinite;
         }
 
@@ -549,27 +605,25 @@
         /* Winners Display */
         .winners-display {
             position: absolute;
-            top: 90px;
+            top: 110px;
             right: 20px;
             background: rgba(255, 255, 255, 0.95);
-            padding: 12px;
-            border-radius: 8px;
-            max-width: 180px;
+            padding: 15px;
+            border-radius: 10px;
+            max-width: 200px;
             z-index: 10;
-            font-size: 0.9em;
         }
 
         .winners-display h3 {
-            margin-bottom: 8px;
-            font-size: 1em;
+            margin-bottom: 10px;
+            font-size: 1.1em;
         }
 
         .winner-item {
-            padding: 4px;
-            margin: 3px 0;
+            padding: 5px;
+            margin: 5px 0;
             background: #d4edda;
-            border-radius: 4px;
-            font-size: 0.85em;
+            border-radius: 5px;
         }
 
         /* Chat */
@@ -620,13 +674,13 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.9);
+            background: rgba(0, 0, 0, 0.95);
             color: white;
             padding: 30px;
             border-radius: 20px;
             text-align: center;
             z-index: 1000;
-            min-width: 300px;
+            min-width: 350px;
         }
 
         .timer-display {
@@ -647,7 +701,7 @@
             border-radius: 20px;
             text-align: center;
             z-index: 1000;
-            min-width: 400px;
+            min-width: 450px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
         }
 
@@ -692,11 +746,11 @@
             top: 50px;
             left: 50%;
             transform: translateX(-50%);
-            padding: 8px 20px;
-            border-radius: 8px;
+            padding: 10px 25px;
+            border-radius: 10px;
             font-weight: bold;
             z-index: 100;
-            font-size: 1em;
+            font-size: 1.1em;
         }
 
         .message.success {
@@ -719,19 +773,21 @@
         }
 
         @media (max-width: 768px) {
-            .player-slot {
-                width: 140px;
-                padding: 8px;
+            .card {
+                width: 45px;
+                height: 62px;
+                font-size: 1em;
             }
             
-            .card {
-                width: 30px;
-                height: 42px;
-                font-size: 0.7em;
+            .current-player .card {
+                width: 55px;
+                height: 75px;
+                font-size: 1.2em;
             }
             
             .battlefield-container {
-                width: 300px;
+                min-width: 320px;
+                padding: 15px;
             }
             
             .game-mode-options {
@@ -814,51 +870,61 @@
             Room: <span id="gameRoomCodeBadge">-</span>
         </div>
         
+        <div id="turnIndicator" class="turn-indicator">
+            <div id="turnText">Waiting...</div>
+        </div>
+        
+        <div class="top-info">
+            <div class="info-box">Round: <span id="roundNumber">1</span></div>
+            <div class="info-box">Mode: <span id="gameModeInfo">Classic</span></div>
+            <div class="info-box">Trump: <span id="trumpSuit" style="font-size: 1.3em;">-</span></div>
+            <div class="info-box">Deck: <span id="deckCount">36</span></div>
+            <div class="info-box">Players: <span id="activePlayerCount">-</span></div>
+            <div class="info-box">Spectators: <span id="spectatorCount">0</span></div>
+        </div>
+        
+        <div id="gameMessage" class="message hidden"></div>
+        
+        <div id="spectatorList" class="spectator-list hidden">
+            <h4>👁️ Spectators</h4>
+            <div id="spectatorNames"></div>
+        </div>
+        
+        <div id="winnersDisplay" class="winners-display hidden">
+            <h3>🏆 Winners</h3>
+            <div id="winnersList"></div>
+        </div>
+        
         <div class="game-table">
-            <div id="turnIndicator" class="turn-indicator" style="position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000;">
-                <div id="turnText">Waiting...</div>
-            </div>
-            
-            <div class="top-info" style="margin-top: 45px;">
-                <div class="info-box">Round: <span id="roundNumber">1</span></div>
-                <div class="info-box">Mode: <span id="gameModeInfo">Classic</span></div>
-                <div class="info-box">Trump: <span id="trumpSuit">-</span></div>
-                <div class="info-box">Deck: <span id="deckCount">36</span></div>
-                <div class="info-box">Players: <span id="activePlayerCount">-</span></div>
-                <div class="info-box">Spectators: <span id="spectatorCount">0</span></div>
-            </div>
-            
-            <div id="gameMessage" class="message hidden"></div>
-            
-            <div id="spectatorList" class="spectator-list hidden">
-                <h4>👁️ Spectators</h4>
-                <div id="spectatorNames"></div>
-            </div>
-            
-            <div class="players-circle" id="playersCircle">
-                <!-- Player slots will be dynamically added here -->
-            </div>
-            
-            <div class="battlefield-container">
-                <div class="battlefield-title">Battlefield</div>
-                <div id="battlefield" class="battlefield"></div>
-            </div>
-            
-            <div class="deck-area">
-                <div style="color: white; font-size: 0.8em; margin-bottom: 5px;">Deck & Trump:</div>
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <div class="deck">
-                        <span id="deckDisplay">36</span>
+            <!-- 2-player layout -->
+            <div id="twoPlayerLayout" class="game-area hidden">
+                <div class="opponent-area" id="opponentArea"></div>
+                
+                <div class="central-area">
+                    <div class="deck-area">
+                        <div style="color: white; font-size: 1em; margin-bottom: 5px;">Deck & Trump:</div>
+                        <div class="deck-display">
+                            <div class="deck">
+                                <span id="deckDisplay">36</span>
+                            </div>
+                            <div class="trump-card-wrapper" style="display: none;">
+                                <div id="trumpCard" class="card trump-card"></div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="trump-card-wrapper" style="display: none;">
-                        <div id="trumpCard" class="card trump-card"></div>
+                    
+                    <div class="battlefield-container">
+                        <div class="battlefield-title">Battlefield</div>
+                        <div id="battlefield" class="battlefield"></div>
                     </div>
                 </div>
+                
+                <div class="player-area" id="playerArea"></div>
             </div>
             
-            <div id="winnersDisplay" class="winners-display hidden">
-                <h3>🏆 Winners</h3>
-                <div id="winnersList"></div>
+            <!-- Multi-player circle layout -->
+            <div id="playersCircle" class="players-circle">
+                <!-- Player slots will be dynamically added here -->
             </div>
         </div>
         
@@ -887,8 +953,8 @@
         <h2>Taking Cards!</h2>
         <div class="timer-display" id="timerDisplay">3</div>
         <div>Players can throw in cards with these ranks:</div>
-        <div id="validRanks" class="valid-ranks"></div>
-        <button id="finishThrowInBtn" onclick="finishThrowIn()" style="display: none;">Done Adding</button>
+        <div id="validRanks" class="valid-ranks" style="font-size: 1.3em; margin-top: 10px;"></div>
+        <button id="finishThrowInBtn" onclick="finishThrowIn()" style="display: none; margin-top: 20px;">Done Adding</button>
     </div>
 
     <!-- Voting Modal -->
@@ -1298,41 +1364,127 @@
         }
         
         function createPlayerSlots() {
-            const container = document.getElementById('playersCircle');
-            container.innerHTML = '';
-            
             if (!gameState) return;
             
-            // Only show non-spectator players in the game circle
+            // Only show non-spectator players in the game
             const activePlayers = gameState.players.filter(p => !p.isSpectator);
             const numPlayers = activePlayers.length;
             
-            // Find current player's index
-            const currentPlayerIndex = activePlayers.findIndex(p => p.id === socket.id);
-            const isCurrentPlayerActive = currentPlayerIndex !== -1;
-            
-            // Reorder players array so current player is first (if they're playing)
-            const reorderedPlayers = [];
-            if (isCurrentPlayerActive) {
-                for (let i = 0; i < numPlayers; i++) {
-                    const index = (currentPlayerIndex + i) % numPlayers;
-                    reorderedPlayers.push(activePlayers[index]);
+            // Use different layouts based on number of players
+            if (numPlayers === 2) {
+                // Use special 2-player layout
+                document.getElementById('twoPlayerLayout').classList.remove('hidden');
+                document.getElementById('playersCircle').classList.remove('active');
+                
+                const currentPlayer = activePlayers.find(p => p.id === socket.id);
+                const opponent = activePlayers.find(p => p.id !== socket.id);
+                
+                // Clear areas
+                document.getElementById('opponentArea').innerHTML = '';
+                document.getElementById('playerArea').innerHTML = '';
+                
+                // Create opponent slot at top
+                if (opponent) {
+                    const opponentSlot = createPlayerSlot(opponent, false);
+                    document.getElementById('opponentArea').appendChild(opponentSlot);
+                }
+                
+                // Create current player slot at bottom
+                if (currentPlayer) {
+                    const playerSlot = createPlayerSlot(currentPlayer, true);
+                    document.getElementById('playerArea').appendChild(playerSlot);
+                } else if (isSpectator) {
+                    // Show both players for spectators
+                    if (activePlayers[0]) {
+                        const slot1 = createPlayerSlot(activePlayers[0], false);
+                        document.getElementById('opponentArea').appendChild(slot1);
+                    }
+                    if (activePlayers[1]) {
+                        const slot2 = createPlayerSlot(activePlayers[1], false);
+                        document.getElementById('playerArea').appendChild(slot2);
+                    }
                 }
             } else {
-                // If spectating, just show players in their original order
-                reorderedPlayers.push(...activePlayers);
+                // Use circle layout for 3-6 players
+                document.getElementById('twoPlayerLayout').classList.add('hidden');
+                document.getElementById('playersCircle').classList.add('active');
+                
+                const container = document.getElementById('playersCircle');
+                container.innerHTML = '';
+                
+                // Find current player's index
+                const currentPlayerIndex = activePlayers.findIndex(p => p.id === socket.id);
+                const isCurrentPlayerActive = currentPlayerIndex !== -1;
+                
+                // Reorder players array so current player is first (if they're playing)
+                const reorderedPlayers = [];
+                if (isCurrentPlayerActive) {
+                    for (let i = 0; i < numPlayers; i++) {
+                        const index = (currentPlayerIndex + i) % numPlayers;
+                        reorderedPlayers.push(activePlayers[index]);
+                    }
+                } else {
+                    // If spectating, just show players in their original order
+                    reorderedPlayers.push(...activePlayers);
+                }
+                
+                // Position calculations based on number of players
+                const positions = getCirclePositions(numPlayers, isCurrentPlayerActive);
+                
+                // Create slots for each player
+                reorderedPlayers.forEach((player, index) => {
+                    const pos = positions[index];
+                    if (!pos) return;
+                    
+                    const slot = createPlayerSlot(player, isCurrentPlayerActive && index === 0);
+                    slot.classList.add('position-circle');
+                    slot.style.left = `${pos.x}%`;
+                    slot.style.top = `${pos.y}%`;
+                    slot.style.transform = 'translate(-50%, -50%)';
+                    
+                    container.appendChild(slot);
+                });
+            }
+        }
+        
+        function createPlayerSlot(player, isCurrentPlayer) {
+            const slot = document.createElement('div');
+            slot.className = 'player-slot';
+            slot.id = `player-${player.id}`;
+            
+            if (isCurrentPlayer) {
+                slot.classList.add('current-player');
             }
             
-            // Position calculations based on number of players
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'player-name';
+            nameDiv.textContent = player.name + (player.id === socket.id ? ' (You)' : '');
+            
+            const cardsDiv = document.createElement('div');
+            cardsDiv.className = 'player-cards';
+            cardsDiv.id = `cards-${player.id}`;
+            
+            const infoDiv = document.createElement('div');
+            infoDiv.style.textAlign = 'center';
+            infoDiv.style.fontSize = '0.9em';
+            infoDiv.style.color = '#666';
+            infoDiv.style.marginTop = '5px';
+            infoDiv.id = `info-${player.id}`;
+            
+            slot.appendChild(nameDiv);
+            slot.appendChild(cardsDiv);
+            slot.appendChild(infoDiv);
+            
+            return slot;
+        }
+        
+        function getCirclePositions(numPlayers, isCurrentPlayerActive) {
             const positions = [];
             
-            if (numPlayers === 2) {
-                positions.push({ x: 50, y: isCurrentPlayerActive ? 85 : 50 });
-                positions.push({ x: 50, y: isCurrentPlayerActive ? 15 : 50 });
-            } else if (numPlayers === 3) {
+            if (numPlayers === 3) {
                 positions.push({ x: 50, y: isCurrentPlayerActive ? 85 : 75 });
-                positions.push({ x: 20, y: 20 });
-                positions.push({ x: 80, y: 20 });
+                positions.push({ x: 20, y: 30 });
+                positions.push({ x: 80, y: 30 });
             } else if (numPlayers === 4) {
                 positions.push({ x: 50, y: isCurrentPlayerActive ? 85 : 75 });
                 positions.push({ x: 15, y: 50 });
@@ -1340,58 +1492,20 @@
                 positions.push({ x: 85, y: 50 });
             } else if (numPlayers === 5) {
                 positions.push({ x: 50, y: isCurrentPlayerActive ? 85 : 75 });
-                positions.push({ x: 15, y: 65 });
-                positions.push({ x: 15, y: 25 });
-                positions.push({ x: 50, y: 15 });
-                positions.push({ x: 85, y: 25 });
+                positions.push({ x: 15, y: 60 });
+                positions.push({ x: 20, y: 20 });
+                positions.push({ x: 80, y: 20 });
+                positions.push({ x: 85, y: 60 });
             } else if (numPlayers === 6) {
                 positions.push({ x: 50, y: isCurrentPlayerActive ? 85 : 75 });
-                positions.push({ x: 15, y: 70 });
-                positions.push({ x: 15, y: 35 });
+                positions.push({ x: 15, y: 65 });
+                positions.push({ x: 15, y: 30 });
                 positions.push({ x: 50, y: 15 });
-                positions.push({ x: 85, y: 35 });
-                positions.push({ x: 85, y: 70 });
+                positions.push({ x: 85, y: 30 });
+                positions.push({ x: 85, y: 65 });
             }
             
-            // Create slots for each player
-            reorderedPlayers.forEach((player, index) => {
-                const pos = positions[index];
-                if (!pos) return;
-                
-                const slot = document.createElement('div');
-                slot.className = 'player-slot';
-                slot.id = `player-${player.id}`;
-                slot.style.left = `${pos.x}%`;
-                slot.style.top = `${pos.y}%`;
-                slot.style.transform = 'translate(-50%, -50%)';
-                
-                // Current player (always at index 0 after reordering)
-                if (isCurrentPlayerActive && index === 0) {
-                    slot.classList.add('current-player');
-                    slot.style.width = '180px';
-                    slot.style.zIndex = '10';
-                }
-                
-                const nameDiv = document.createElement('div');
-                nameDiv.className = 'player-name';
-                nameDiv.textContent = player.name + (player.id === socket.id ? ' (You)' : '');
-                nameDiv.style.fontSize = '0.9em';
-                
-                const cardsDiv = document.createElement('div');
-                cardsDiv.className = 'player-cards';
-                cardsDiv.id = `cards-${player.id}`;
-                
-                const infoDiv = document.createElement('div');
-                infoDiv.style.textAlign = 'center';
-                infoDiv.style.fontSize = '0.8em';
-                infoDiv.style.color = '#666';
-                infoDiv.id = `info-${player.id}`;
-                
-                slot.appendChild(nameDiv);
-                slot.appendChild(cardsDiv);
-                slot.appendChild(infoDiv);
-                container.appendChild(slot);
-            });
+            return positions;
         }
         
         function updateGameDisplay() {
@@ -1437,8 +1551,8 @@
             if (gameState.deckCount > 0 && gameState.trumpCard) {
                 trumpWrapper.style.display = 'flex';
                 trumpCardEl.innerHTML = `
-                    <div>${gameState.trumpCard.rank}</div>
-                    <div>${gameState.trumpCard.suit}</div>
+                    <div style="font-size: 1.1em">${gameState.trumpCard.rank}</div>
+                    <div style="font-size: 1.5em">${gameState.trumpCard.suit}</div>
                 `;
                 trumpCardEl.className = `card trump-card ${(gameState.trumpCard.suit === '♥' || gameState.trumpCard.suit === '♦') ? 'red' : 'black'}`;
             } else {
@@ -1447,7 +1561,7 @@
             
             // Update each player's display
             gameState.players.forEach(player => {
-                if (player.isSpectator) return; // Don't show spectators in game circle
+                if (player.isSpectator) return; // Don't show spectators in game
                 
                 const slot = document.getElementById(`player-${player.id}`);
                 if (!slot) return;
@@ -1539,8 +1653,8 @@
             }
             
             cardEl.innerHTML = `
-                <div style="font-size: 0.8em">${card.rank}</div>
-                <div>${card.suit}</div>
+                <div style="font-size: 0.9em">${card.rank}</div>
+                <div style="font-size: 1.3em">${card.suit}</div>
             `;
             
             cardEl.onclick = () => selectCard(index);
@@ -1569,8 +1683,8 @@
                     const attackEl = document.createElement('div');
                     attackEl.className = `card ${(pair.attack.suit === '♥' || pair.attack.suit === '♦') ? 'red' : 'black'}`;
                     attackEl.innerHTML = `
-                        <div style="font-size: 0.8em">${pair.attack.rank}</div>
-                        <div>${pair.attack.suit}</div>
+                        <div style="font-size: 0.9em">${pair.attack.rank}</div>
+                        <div style="font-size: 1.3em">${pair.attack.suit}</div>
                     `;
                     
                     // Make attack card clickable if it can be defended
@@ -1585,8 +1699,8 @@
                         const defenseEl = document.createElement('div');
                         defenseEl.className = `card ${(pair.defense.suit === '♥' || pair.defense.suit === '♦') ? 'red' : 'black'}`;
                         defenseEl.innerHTML = `
-                            <div style="font-size: 0.8em">${pair.defense.rank}</div>
-                            <div>${pair.defense.suit}</div>
+                            <div style="font-size: 0.9em">${pair.defense.rank}</div>
+                            <div style="font-size: 1.3em">${pair.defense.suit}</div>
                         `;
                         pairEl.appendChild(defenseEl);
                     }
