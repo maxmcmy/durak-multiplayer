@@ -384,6 +384,7 @@ io.on('connection', (socket) => {
                 
                 // Check if all attacks are defended
                 if (room.battlefield.every(pair => pair.defense)) {
+                    // Attacker can now continue attacking or end turn
                     room.gamePhase = 'attacking';
                 }
                 
@@ -392,7 +393,8 @@ io.on('connection', (socket) => {
                     io.to(p.id).emit('cardPlayed', {
                         gameState: getSafeGameState(room, p.id),
                         action: 'defend',
-                        playerId: socket.id
+                        playerId: socket.id,
+                        allDefended: room.battlefield.every(pair => pair.defense)
                     });
                 });
             } else {
@@ -503,84 +505,50 @@ io.on('connection', (socket) => {
         completeTakeCards(room);
     });
     
-    // Pass (successful defense)
-    socket.on('pass', () => {
-        const roomCode = playerRooms.get(socket.id);
-        const room = gameRooms.get(roomCode);
-        
-        if (!room || room.gameState !== 'playing') return;
-        if (room.currentDefender !== socket.id) return;
-        if (!room.battlefield.every(pair => pair.defense)) return;
-        
-        const defender = room.players.find(p => p.id === socket.id);
-        const attacker = room.players.find(p => p.id === room.currentAttacker);
-        
-        // Clear battlefield
-        room.battlefield = [];
-        room.throwInCards = [];
-        
-        // Draw cards
-        while (attacker.hand.length < 6 && room.deck.length > 0) {
-            attacker.hand.push(room.deck.pop());
-        }
-        while (defender.hand.length < 6 && room.deck.length > 0) {
-            defender.hand.push(room.deck.pop());
-        }
-        
-        // Switch roles
-        const temp = room.currentAttacker;
-        room.currentAttacker = room.currentDefender;
-        room.currentDefender = temp;
-        room.gamePhase = 'attacking';
-        
-        // Notify all players
-        room.players.forEach(p => {
-            io.to(p.id).emit('passed', {
-                gameState: getSafeGameState(room, p.id)
-            });
-        });
-        
-        checkGameEnd(room);
-    });
-    
-    // End attack
+    // End attack (only attacker can end after all defended or during their attacking phase)
     socket.on('endAttack', () => {
         const roomCode = playerRooms.get(socket.id);
         const room = gameRooms.get(roomCode);
         
         if (!room || room.gameState !== 'playing') return;
         if (room.currentAttacker !== socket.id) return;
-        if (!room.battlefield.every(pair => pair.defense)) return;
         
         const attacker = room.players.find(p => p.id === socket.id);
         const defender = room.players.find(p => p.id === room.currentDefender);
         
-        // Clear battlefield
-        room.battlefield = [];
-        room.throwInCards = [];
-        
-        // Draw cards
-        while (attacker.hand.length < 6 && room.deck.length > 0) {
-            attacker.hand.push(room.deck.pop());
-        }
-        while (defender.hand.length < 6 && room.deck.length > 0) {
-            defender.hand.push(room.deck.pop());
-        }
-        
-        // Switch roles
-        const temp = room.currentAttacker;
-        room.currentAttacker = room.currentDefender;
-        room.currentDefender = temp;
-        room.gamePhase = 'attacking';
-        
-        // Notify all players
-        room.players.forEach(p => {
-            io.to(p.id).emit('attackEnded', {
-                gameState: getSafeGameState(room, p.id)
+        // Can end attack if:
+        // 1. All attacks are defended (defender succeeded)
+        // 2. Attacker chooses to end during attacking phase
+        if (room.gamePhase === 'attacking' || 
+            (room.battlefield.length > 0 && room.battlefield.every(pair => pair.defense))) {
+            
+            // Clear battlefield
+            room.battlefield = [];
+            room.throwInCards = [];
+            
+            // Draw cards (attacker first, then defender)
+            while (attacker.hand.length < 6 && room.deck.length > 0) {
+                attacker.hand.push(room.deck.pop());
+            }
+            while (defender.hand.length < 6 && room.deck.length > 0) {
+                defender.hand.push(room.deck.pop());
+            }
+            
+            // Switch roles
+            const temp = room.currentAttacker;
+            room.currentAttacker = room.currentDefender;
+            room.currentDefender = temp;
+            room.gamePhase = 'attacking';
+            
+            // Notify all players
+            room.players.forEach(p => {
+                io.to(p.id).emit('attackEnded', {
+                    gameState: getSafeGameState(room, p.id)
+                });
             });
-        });
-        
-        checkGameEnd(room);
+            
+            checkGameEnd(room);
+        }
     });
     
     // Send message
