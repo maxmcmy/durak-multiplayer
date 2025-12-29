@@ -942,29 +942,52 @@ function completeSuccessfulDefense(room) {
     const initialAttacker = room.players.find(p => p.id === room.initialAttackerId);
     
     // Draw for initial attacker first
-    if (initialAttacker) {
+    if (initialAttacker && !initialAttacker.hasWon) {
         drawCardsForPlayer(room, initialAttacker);
+    }
+    
+    // Draw for defender
+    if (defender && !defender.hasWon) {
+        drawCardsForPlayer(room, defender);
     }
     
     // Draw for other players in clockwise order
     room.players.forEach(player => {
-        if (player.id !== room.initialAttackerId && player.isActive && !player.hasWon && !player.isSpectator) {
+        if (player.id !== room.initialAttackerId && player.id !== room.currentDefenderId && 
+            player.isActive && !player.hasWon && !player.isSpectator) {
             drawCardsForPlayer(room, player);
         }
     });
     
     // Defender becomes new attacker, next player defends
-    if (defender) {
+    if (defender && !defender.hasWon && !defender.isSpectator) {
         room.initialAttackerId = defender.id;
         const nextDefender = getNextActivePlayer(room, defender.id);
         
         if (nextDefender) {
             room.currentDefenderId = nextDefender.id;
             room.additionalAttackers = getAttackers(room).filter(p => p.id !== room.initialAttackerId).map(p => p.id);
+            room.gamePhase = 'attacking';
+        } else {
+            // No valid next defender, check if game should end
+            console.log('No next defender available after successful defense');
+        }
+    } else {
+        // Defender has won or is spectator, find next valid attacker
+        const nextAttacker = getNextActivePlayer(room, room.currentDefenderId);
+        if (nextAttacker) {
+            room.initialAttackerId = nextAttacker.id;
+            const nextDefender = getNextActivePlayer(room, nextAttacker.id);
+            if (nextDefender) {
+                room.currentDefenderId = nextDefender.id;
+                room.additionalAttackers = getAttackers(room).filter(p => p.id !== room.initialAttackerId).map(p => p.id);
+                room.gamePhase = 'attacking';
+            }
         }
     }
     
-    room.gamePhase = 'attacking';
+    // Update player order
+    updatePlayerOrder(room);
     
     // Notify all players
     room.players.forEach(p => {
