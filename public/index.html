@@ -331,6 +331,25 @@
         .players-circle.active {
             display: block;
         }
+        
+        /* Central game elements for 3-6 player layouts */
+        .central-game-elements {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            align-items: center;
+            gap: 40px;
+            z-index: 6;
+        }
+        
+        .deck-area-multi {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
 
         /* Improved player slot design */
         .player-slot {
@@ -926,6 +945,26 @@
             <div id="playersCircle" class="players-circle">
                 <!-- Player slots will be dynamically added here -->
             </div>
+            
+            <!-- Central game elements for 3-6 players (always visible when not in 2-player mode) -->
+            <div id="centralGameArea" class="central-game-elements hidden">
+                <div class="deck-area-multi">
+                    <div style="color: white; font-size: 1em; margin-bottom: 5px;">Deck & Trump:</div>
+                    <div class="deck-display">
+                        <div class="deck">
+                            <span id="deckDisplayMulti">36</span>
+                        </div>
+                        <div class="trump-card-wrapper" style="display: none;">
+                            <div id="trumpCardMulti" class="card trump-card"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="battlefield-container">
+                    <div class="battlefield-title">Battlefield</div>
+                    <div id="battlefieldMulti" class="battlefield"></div>
+                </div>
+            </div>
         </div>
         
         <div class="bottom-controls">
@@ -1375,6 +1414,7 @@
                 // Use special 2-player layout
                 document.getElementById('twoPlayerLayout').classList.remove('hidden');
                 document.getElementById('playersCircle').classList.remove('active');
+                document.getElementById('centralGameArea').classList.add('hidden');
                 
                 const currentPlayer = activePlayers.find(p => p.id === socket.id);
                 const opponent = activePlayers.find(p => p.id !== socket.id);
@@ -1408,6 +1448,7 @@
                 // Use circle layout for 3-6 players
                 document.getElementById('twoPlayerLayout').classList.add('hidden');
                 document.getElementById('playersCircle').classList.add('active');
+                document.getElementById('centralGameArea').classList.remove('hidden');
                 
                 const container = document.getElementById('playersCircle');
                 container.innerHTML = '';
@@ -1539,24 +1580,48 @@
                 document.getElementById('spectatorList').classList.add('hidden');
             }
             
-            // Update trump and deck
+            // Update trump and deck for both layouts
+            const activePlayersCount = gameState.players.filter(p => !p.isSpectator).length;
+            const isMultiPlayer = activePlayersCount > 2;
+            
             document.getElementById('trumpSuit').textContent = gameState.trumpSuit || '-';
             document.getElementById('deckCount').textContent = gameState.deckCount;
-            document.getElementById('deckDisplay').textContent = gameState.deckCount;
             
-            // Update trump card display
-            const trumpCardEl = document.getElementById('trumpCard');
-            const trumpWrapper = trumpCardEl.parentElement;
-            
-            if (gameState.deckCount > 0 && gameState.trumpCard) {
-                trumpWrapper.style.display = 'flex';
-                trumpCardEl.innerHTML = `
-                    <div style="font-size: 1.1em">${gameState.trumpCard.rank}</div>
-                    <div style="font-size: 1.5em">${gameState.trumpCard.suit}</div>
-                `;
-                trumpCardEl.className = `card trump-card ${(gameState.trumpCard.suit === '♥' || gameState.trumpCard.suit === '♦') ? 'red' : 'black'}`;
+            // Update deck display based on layout
+            if (isMultiPlayer) {
+                document.getElementById('deckDisplayMulti').textContent = gameState.deckCount;
+                
+                // Update trump card display for multiplayer
+                const trumpCardEl = document.getElementById('trumpCardMulti');
+                const trumpWrapper = trumpCardEl.parentElement;
+                
+                if (gameState.deckCount > 0 && gameState.trumpCard) {
+                    trumpWrapper.style.display = 'flex';
+                    trumpCardEl.innerHTML = `
+                        <div style="font-size: 1.1em">${gameState.trumpCard.rank}</div>
+                        <div style="font-size: 1.5em">${gameState.trumpCard.suit}</div>
+                    `;
+                    trumpCardEl.className = `card trump-card ${(gameState.trumpCard.suit === '♥' || gameState.trumpCard.suit === '♦') ? 'red' : 'black'}`;
+                } else {
+                    trumpWrapper.style.display = 'none';
+                }
             } else {
-                trumpWrapper.style.display = 'none';
+                document.getElementById('deckDisplay').textContent = gameState.deckCount;
+                
+                // Update trump card display for 2-player
+                const trumpCardEl = document.getElementById('trumpCard');
+                const trumpWrapper = trumpCardEl.parentElement;
+                
+                if (gameState.deckCount > 0 && gameState.trumpCard) {
+                    trumpWrapper.style.display = 'flex';
+                    trumpCardEl.innerHTML = `
+                        <div style="font-size: 1.1em">${gameState.trumpCard.rank}</div>
+                        <div style="font-size: 1.5em">${gameState.trumpCard.suit}</div>
+                    `;
+                    trumpCardEl.className = `card trump-card ${(gameState.trumpCard.suit === '♥' || gameState.trumpCard.suit === '♦') ? 'red' : 'black'}`;
+                } else {
+                    trumpWrapper.style.display = 'none';
+                }
             }
             
             // Update each player's display
@@ -1662,7 +1727,12 @@
         }
         
         function updateBattlefield() {
-            const battlefieldEl = document.getElementById('battlefield');
+            // Determine which battlefield element to use based on active player count
+            const activePlayersCount = gameState.players.filter(p => !p.isSpectator).length;
+            const battlefieldId = activePlayersCount > 2 ? 'battlefieldMulti' : 'battlefield';
+            const battlefieldEl = document.getElementById(battlefieldId);
+            
+            if (!battlefieldEl) return;
             battlefieldEl.innerHTML = '';
             
             if (gameState.battlefield) {
