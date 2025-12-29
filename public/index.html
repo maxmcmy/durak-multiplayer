@@ -176,8 +176,8 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-top: 80px; /* Add margin to avoid overlap with top elements */
-            margin-bottom: 100px; /* Add margin to avoid overlap with bottom elements */
+            margin-top: 80px;
+            margin-bottom: 100px;
         }
 
         .player-slot {
@@ -933,23 +933,71 @@
             if (!gameState) return;
             
             const numPlayers = gameState.players.length;
-            const radius = 40; // Increased radius for better spacing
-            const angleStep = (2 * Math.PI) / numPlayers;
             
-            gameState.players.forEach((player, index) => {
-                const angle = angleStep * index - Math.PI / 2; // Start from top
-                const x = 50 + radius * Math.cos(angle);
-                const y = 50 + radius * Math.sin(angle);
+            // Find current player's index
+            const currentPlayerIndex = gameState.players.findIndex(p => p.id === socket.id);
+            if (currentPlayerIndex === -1) return;
+            
+            // Reorder players array so current player is first
+            const reorderedPlayers = [];
+            for (let i = 0; i < numPlayers; i++) {
+                const index = (currentPlayerIndex + i) % numPlayers;
+                reorderedPlayers.push(gameState.players[index]);
+            }
+            
+            // Position calculations based on number of players
+            const positions = [];
+            
+            if (numPlayers === 2) {
+                // 2 players: bottom and top
+                positions.push({ x: 50, y: 85 }); // Current player at bottom
+                positions.push({ x: 50, y: 15 }); // Opponent at top
+            } else if (numPlayers === 3) {
+                // 3 players: bottom, top-left, top-right
+                positions.push({ x: 50, y: 85 }); // Current player at bottom
+                positions.push({ x: 20, y: 20 }); // Top-left
+                positions.push({ x: 80, y: 20 }); // Top-right
+            } else if (numPlayers === 4) {
+                // 4 players: bottom, left, top, right
+                positions.push({ x: 50, y: 85 }); // Current player at bottom
+                positions.push({ x: 15, y: 50 }); // Left
+                positions.push({ x: 50, y: 15 }); // Top
+                positions.push({ x: 85, y: 50 }); // Right
+            } else if (numPlayers === 5) {
+                // 5 players: bottom, and 4 others spread around
+                positions.push({ x: 50, y: 85 }); // Current player at bottom
+                positions.push({ x: 15, y: 65 }); // Bottom-left
+                positions.push({ x: 15, y: 25 }); // Top-left
+                positions.push({ x: 50, y: 15 }); // Top
+                positions.push({ x: 85, y: 25 }); // Top-right
+            } else if (numPlayers === 6) {
+                // 6 players: bottom, and 5 others spread around
+                positions.push({ x: 50, y: 85 }); // Current player at bottom
+                positions.push({ x: 15, y: 70 }); // Bottom-left
+                positions.push({ x: 15, y: 35 }); // Left
+                positions.push({ x: 50, y: 15 }); // Top
+                positions.push({ x: 85, y: 35 }); // Right
+                positions.push({ x: 85, y: 70 }); // Bottom-right
+            }
+            
+            // Create slots for each player
+            reorderedPlayers.forEach((player, index) => {
+                const pos = positions[index];
+                if (!pos) return;
                 
                 const slot = document.createElement('div');
                 slot.className = 'player-slot';
                 slot.id = `player-${player.id}`;
-                slot.style.left = `${x}%`;
-                slot.style.top = `${y}%`;
+                slot.style.left = `${pos.x}%`;
+                slot.style.top = `${pos.y}%`;
                 slot.style.transform = 'translate(-50%, -50%)';
                 
-                if (player.id === socket.id) {
+                // Current player (always at index 0 after reordering)
+                if (index === 0) {
                     slot.classList.add('current-player');
+                    // Make current player's slot slightly larger
+                    slot.style.width = '180px';
+                    slot.style.zIndex = '10';
                 }
                 
                 const nameDiv = document.createElement('div');
