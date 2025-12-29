@@ -1,4 +1,4 @@
-// server.js - Durak Multiplayer Server with Throw-In Feature
+// server.js - Durak Multiplayer Server (2-6 Players)
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -18,7 +18,13 @@ app.use(express.static('public'));
 
 // Game rooms storage
 const gameRooms = new Map();
-const playerRooms = new Map(); // Track which room each player is in
+const playerRooms = new Map();
+
+// Game constants
+const MIN_PLAYERS = 2;
+const MAX_PLAYERS = 6;
+const INITIAL_HAND_SIZE = 6;
+const MAX_BATTLEFIELD_SIZE = 6;
 
 // Card representations
 const suits = ['♠', '♥', '♦', '♣'];
@@ -52,31 +58,38 @@ function shuffleDeck(deck) {
 }
 
 // Create a new game room
-function createRoom(roomCode, creatorId, creatorName) {
+function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4) {
     const room = {
         code: roomCode,
+        maxPlayers: Math.min(Math.max(maxPlayers, MIN_PLAYERS), MAX_PLAYERS),
         players: [{
             id: creatorId,
             name: creatorName,
             ready: false,
             hand: [],
-            connected: true
+            connected: true,
+            position: 0,
+            isActive: true, // Still in game (has cards or just won)
+            hasWon: false
         }],
         gameState: 'waiting', // waiting, playing, finished
         deck: [],
         battlefield: [],
         trumpCard: null,
         trumpSuit: '',
-        currentAttacker: null,
-        currentDefender: null,
+        initialAttackerId: null, // Player who started the current attack
+        currentDefenderId: null, // Player who is defending
+        additionalAttackers: [], // Other players who can add cards
         gamePhase: 'waiting', // waiting, attacking, defending, throwIn
         throwInTimer: null,
         throwInDeadline: null,
         validThrowInRanks: new Set(),
-        throwInCards: [], // Cards being thrown in after take
-        maxThrowInTotal: 6, // Maximum cards that can be given to defender
+        throwInCards: [],
+        maxThrowInTotal: 6,
         turnTimer: null,
-        lastAction: Date.now()
+        lastAction: Date.now(),
+        winners: [], // Players who have run out of cards
+        playerOrder: [] // Clockwise order of active players
     };
     
     gameRooms.set(roomCode, room);
@@ -84,10 +97,41 @@ function createRoom(roomCode, creatorId, creatorName) {
     return room;
 }
 
+// Get next active player in clockwise order
+function getNextActivePlayer(room, afterPlayerId) {
+    const afterPlayer = room.players.find(p => p.id === afterPlayerId);
+    if (!afterPlayer) return null;
+    
+    let nextPosition = (afterPlayer.position + 1) % room.players.length;
+    let attempts = 0;
+    
+    while (attempts < room.players.length) {
+        const nextPlayer = room.players.find(p => p.position === nextPosition);
+        if (nextPlayer && nextPlayer.isActive && !nextPlayer.hasWon) {
+            return nextPlayer;
+        }
+        nextPosition = (nextPosition + 1) % room.players.length;
+        attempts++;
+    }
+    
+    return null;
+}
+
+// Get all active players who can attack (everyone except defender)
+function getAttackers(room) {
+    if (!room.currentDefenderId) return [];
+    return room.players.filter(p => 
+        p.isActive && 
+        !p.hasWon && 
+        p.id !== room.currentDefenderId &&
+        p.hand.length > 0
+    );
+}
+
 // Start a game in a room
 function startGame(roomCode) {
     const room = gameRooms.get(roomCode);
-    if (!room || room.players.length !== 2) return false;
+    if (!room || room.players.length < MIN_PLAYERS) return false;
     
     // Initialize game
     room.deck = createDeck();
@@ -95,14 +139,23 @@ function startGame(roomCode) {
     room.throwInCards = [];
     room.gameState = 'playing';
     room.gamePhase = 'attacking';
+    room.winners = [];
+    
+    // Set player positions (clockwise order)
+    room.players.forEach((player, index) => {
+        player.position = index;
+        player.hand = [];
+        player.isActive = true;
+        player.hasWon = false;
+    });
     
     // Deal initial cards
-    room.players[0].hand = [];
-    room.players[1].hand = [];
-    
-    for (let i = 0; i < 6; i++) {
-        room.players[0].hand.push(room.deck.pop());
-        room.players[1].hand.push(room.deck.pop());
+    for (let i = 0; i < INITIAL_HAND_SIZE; i++) {
+        room.players.forEach(player => {
+            if (room.deck.length > 0) {
+                player.hand.push(room.deck.pop());
+            }
+        });
     }
     
     // Set trump card
@@ -110,38 +163,52 @@ function startGame(roomCode) {
     room.trumpSuit = room.trumpCard.suit;
     
     // Mark trump cards
-    [...room.deck, ...room.players[0].hand, ...room.players[1].hand].forEach(card => {
+    [...room.deck, ...room.players.flatMap(p => p.hand)].forEach(card => {
         card.isTrump = card.suit === room.trumpSuit;
     });
     
     // Determine first attacker (player with lowest trump)
     let lowestTrump = null;
-    let firstAttackerIndex = null;
+    let firstAttacker = null;
     
-    room.players.forEach((player, index) => {
+    room.players.forEach(player => {
         player.hand.forEach(card => {
             if (card.isTrump && (!lowestTrump || card.value < lowestTrump.value)) {
                 lowestTrump = card;
-                firstAttackerIndex = index;
+                firstAttacker = player;
             }
         });
     });
     
     // If no one has trump, random start
-    if (firstAttackerIndex === null) {
-        firstAttackerIndex = Math.floor(Math.random() * 2);
+    if (!firstAttacker) {
+        firstAttacker = room.players[Math.floor(Math.random() * room.players.length)];
     }
     
-    room.currentAttacker = room.players[firstAttackerIndex].id;
-    room.currentDefender = room.players[1 - firstAttackerIndex].id;
+    // Set initial attacker and defender
+    room.initialAttackerId = firstAttacker.id;
+    room.currentDefenderId = getNextActivePlayer(room, firstAttacker.id).id;
+    room.additionalAttackers = getAttackers(room).filter(p => p.id !== room.initialAttackerId).map(p => p.id);
+    
+    updatePlayerOrder(room);
     
     return true;
 }
 
+// Update the order of active players
+function updatePlayerOrder(room) {
+    room.playerOrder = room.players
+        .filter(p => p.isActive && !p.hasWon)
+        .sort((a, b) => a.position - b.position)
+        .map(p => p.id);
+}
+
 // Get safe game state (hide opponent's cards)
 function getSafeGameState(room, playerId) {
+    const player = room.players.find(p => p.id === playerId);
     const safeRoom = {
         code: room.code,
+        maxPlayers: room.maxPlayers,
         gameState: room.gameState,
         gamePhase: room.gamePhase,
         battlefield: room.battlefield,
@@ -149,17 +216,26 @@ function getSafeGameState(room, playerId) {
         deckCount: room.deck.length,
         trumpCard: room.trumpCard,
         trumpSuit: room.trumpSuit,
-        currentAttacker: room.currentAttacker,
-        currentDefender: room.currentDefender,
+        initialAttackerId: room.initialAttackerId,
+        currentDefenderId: room.currentDefenderId,
+        additionalAttackers: room.additionalAttackers,
         throwInDeadline: room.throwInDeadline,
         validThrowInRanks: Array.from(room.validThrowInRanks),
+        winners: room.winners,
+        playerOrder: room.playerOrder,
         players: room.players.map(p => ({
             id: p.id,
             name: p.name,
             ready: p.ready,
+            position: p.position,
             cardCount: p.hand.length,
             hand: p.id === playerId ? p.hand : null,
-            connected: p.connected
+            connected: p.connected,
+            isActive: p.isActive,
+            hasWon: p.hasWon,
+            isInitialAttacker: p.id === room.initialAttackerId,
+            isDefender: p.id === room.currentDefenderId,
+            canAttack: room.additionalAttackers.includes(p.id) || p.id === room.initialAttackerId
         }))
     };
     return safeRoom;
@@ -171,10 +247,10 @@ io.on('connection', (socket) => {
     
     // Create a new room
     socket.on('createRoom', (data) => {
-        const { playerName } = data;
+        const { playerName, maxPlayers } = data;
         const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         
-        const room = createRoom(roomCode, socket.id, playerName);
+        const room = createRoom(roomCode, socket.id, playerName, maxPlayers || 4);
         socket.join(roomCode);
         
         socket.emit('roomCreated', {
@@ -182,7 +258,7 @@ io.on('connection', (socket) => {
             gameState: getSafeGameState(room, socket.id)
         });
         
-        console.log(`Room ${roomCode} created by ${playerName}`);
+        console.log(`Room ${roomCode} created by ${playerName} (max ${room.maxPlayers} players)`);
     });
     
     // Join an existing room
@@ -195,8 +271,13 @@ io.on('connection', (socket) => {
             return;
         }
         
-        if (room.players.length >= 2) {
+        if (room.players.length >= room.maxPlayers) {
             socket.emit('error', { message: 'Room is full' });
+            return;
+        }
+        
+        if (room.gameState !== 'waiting') {
+            socket.emit('error', { message: 'Game already in progress' });
             return;
         }
         
@@ -206,7 +287,10 @@ io.on('connection', (socket) => {
             name: playerName,
             ready: false,
             hand: [],
-            connected: true
+            connected: true,
+            position: room.players.length,
+            isActive: true,
+            hasWon: false
         });
         
         playerRooms.set(socket.id, roomCode);
@@ -217,7 +301,7 @@ io.on('connection', (socket) => {
             gameState: getSafeGameState(room, socket.id)
         });
         
-        console.log(`${playerName} joined room ${roomCode}`);
+        console.log(`${playerName} joined room ${roomCode} (${room.players.length}/${room.maxPlayers})`);
     });
     
     // Player ready
@@ -231,8 +315,8 @@ io.on('connection', (socket) => {
         if (player) {
             player.ready = true;
             
-            // Check if all players are ready
-            if (room.players.length === 2 && room.players.every(p => p.ready)) {
+            // Check if all players are ready (minimum 2 players)
+            if (room.players.length >= MIN_PLAYERS && room.players.every(p => p.ready)) {
                 if (startGame(roomCode)) {
                     // Send game state to each player with their own cards visible
                     room.players.forEach(p => {
@@ -241,7 +325,7 @@ io.on('connection', (socket) => {
                         });
                     });
                     
-                    console.log(`Game started in room ${roomCode}`);
+                    console.log(`Game started in room ${roomCode} with ${room.players.length} players`);
                 }
             } else {
                 io.to(roomCode).emit('playerReadyUpdate', {
@@ -250,71 +334,6 @@ io.on('connection', (socket) => {
                 });
             }
         }
-    });
-    
-    // Deflect attack (when defender has same rank)
-    socket.on('deflectAttack', (data) => {
-        const { cardIndex } = data;
-        const roomCode = playerRooms.get(socket.id);
-        const room = gameRooms.get(roomCode);
-        
-        if (!room || room.gameState !== 'playing') return;
-        if (room.currentDefender !== socket.id) return;
-        if (room.gamePhase !== 'defending') return;
-        
-        // Can only deflect if no cards have been defended yet
-        if (room.battlefield.some(pair => pair.defense)) {
-            socket.emit('error', { message: 'Cannot deflect after defending cards' });
-            return;
-        }
-        
-        const defender = room.players.find(p => p.id === socket.id);
-        const attacker = room.players.find(p => p.id === room.currentAttacker);
-        
-        if (cardIndex >= defender.hand.length) return;
-        const deflectCard = defender.hand[cardIndex];
-        
-        // Check if deflect card has same rank as any undefended attack
-        let canDeflect = false;
-        for (let pair of room.battlefield) {
-            if (!pair.defense && pair.attack.rank === deflectCard.rank) {
-                canDeflect = true;
-                break;
-            }
-        }
-        
-        if (!canDeflect) {
-            socket.emit('error', { message: 'You can only deflect with cards of the same rank' });
-            return;
-        }
-        
-        // Check if total attacks don't exceed attacker's hand size
-        const totalAttacks = room.battlefield.length + 1;
-        if (totalAttacks > Math.min(6, attacker.hand.length)) {
-            socket.emit('error', { message: 'Cannot deflect - would exceed card limit' });
-            return;
-        }
-        
-        // Add deflect card to battlefield as new attack
-        room.battlefield.push({ attack: deflectCard, defense: null });
-        defender.hand.splice(cardIndex, 1);
-        
-        // Switch roles - attacker becomes defender
-        const temp = room.currentAttacker;
-        room.currentAttacker = room.currentDefender;
-        room.currentDefender = temp;
-        
-        // Stay in defending phase
-        room.gamePhase = 'defending';
-        
-        // Notify all players
-        room.players.forEach(p => {
-            io.to(p.id).emit('attackDeflected', {
-                gameState: getSafeGameState(room, p.id),
-                deflectedBy: defender.name,
-                card: deflectCard
-            });
-        });
     });
     
     // Play a card (attack or defend)
@@ -330,15 +349,16 @@ io.on('connection', (socket) => {
         
         const card = player.hand[cardIndex];
         
-        // Handle attack
-        if (room.currentAttacker === socket.id && room.gamePhase === 'attacking') {
+        // Handle attack (initial attacker or additional attackers)
+        if ((room.initialAttackerId === socket.id || room.additionalAttackers.includes(socket.id)) 
+            && room.gamePhase === 'attacking') {
+            
             // Check maximum attack limit
-            const defender = room.players.find(p => p.id === room.currentDefender);
-            const undefendedAttacks = room.battlefield.filter(pair => !pair.defense).length;
-            const maxAttacks = Math.min(6, defender.hand.length);
+            const defender = room.players.find(p => p.id === room.currentDefenderId);
+            const maxAttacks = Math.min(MAX_BATTLEFIELD_SIZE, defender.hand.length);
             
             if (room.battlefield.length >= maxAttacks) {
-                socket.emit('error', { message: `Cannot attack with more than ${maxAttacks} cards (defender has ${defender.hand.length} cards)` });
+                socket.emit('error', { message: `Cannot attack with more than ${maxAttacks} cards` });
                 return;
             }
             
@@ -357,7 +377,11 @@ io.on('connection', (socket) => {
             }
             
             // Play attack card
-            room.battlefield.push({ attack: card, defense: null });
+            room.battlefield.push({ 
+                attack: card, 
+                defense: null,
+                attackerId: socket.id 
+            });
             player.hand.splice(cardIndex, 1);
             room.gamePhase = 'defending';
             
@@ -366,13 +390,16 @@ io.on('connection', (socket) => {
                 io.to(p.id).emit('cardPlayed', {
                     gameState: getSafeGameState(room, p.id),
                     action: 'attack',
-                    playerId: socket.id
+                    playerId: socket.id,
+                    playerName: player.name
                 });
             });
+            
+            checkForWinner(room, player);
         }
         
         // Handle defense
-        else if (room.currentDefender === socket.id && room.gamePhase === 'defending') {
+        else if (room.currentDefenderId === socket.id && room.gamePhase === 'defending') {
             // Find undefended attack
             const undefended = room.battlefield.find(pair => !pair.defense);
             if (!undefended) return;
@@ -384,7 +411,7 @@ io.on('connection', (socket) => {
                 
                 // Check if all attacks are defended
                 if (room.battlefield.every(pair => pair.defense)) {
-                    // Attacker can now continue attacking or end turn
+                    // Attackers can now continue attacking or end turn
                     room.gamePhase = 'attacking';
                 }
                 
@@ -394,16 +421,20 @@ io.on('connection', (socket) => {
                         gameState: getSafeGameState(room, p.id),
                         action: 'defend',
                         playerId: socket.id,
+                        playerName: player.name,
                         allDefended: room.battlefield.every(pair => pair.defense)
                     });
                 });
+                
+                checkForWinner(room, player);
             } else {
                 socket.emit('error', { message: 'This card cannot defend' });
             }
         }
         
         // Handle throw-in phase
-        else if (room.currentAttacker === socket.id && room.gamePhase === 'throwIn') {
+        else if ((room.initialAttackerId === socket.id || room.additionalAttackers.includes(socket.id))
+                 && room.gamePhase === 'throwIn') {
             // Check if card rank is valid for throw-in
             if (!room.validThrowInRanks.has(card.rank)) {
                 socket.emit('error', { message: 'You can only throw in cards with ranks that were already played' });
@@ -419,7 +450,10 @@ io.on('connection', (socket) => {
             }
             
             // Add card to throw-in pile
-            room.throwInCards.push(card);
+            room.throwInCards.push({
+                card: card,
+                playerId: socket.id
+            });
             player.hand.splice(cardIndex, 1);
             
             // Notify all players
@@ -427,31 +461,109 @@ io.on('connection', (socket) => {
                 io.to(p.id).emit('throwInCard', {
                     gameState: getSafeGameState(room, p.id),
                     card: card,
+                    playerName: player.name,
                     remainingCapacity: room.maxThrowInTotal - (room.battlefield.length + room.throwInCards.length)
                 });
             });
+            
+            checkForWinner(room, player);
         }
-        
-        checkGameEnd(room);
     });
     
-    // Take cards - now with throw-in phase
+    // Deflect attack
+    socket.on('deflectAttack', (data) => {
+        const { cardIndex } = data;
+        const roomCode = playerRooms.get(socket.id);
+        const room = gameRooms.get(roomCode);
+        
+        if (!room || room.gameState !== 'playing') return;
+        if (room.currentDefenderId !== socket.id) return;
+        if (room.gamePhase !== 'defending') return;
+        
+        // Can only deflect if no cards have been defended yet
+        if (room.battlefield.some(pair => pair.defense)) {
+            socket.emit('error', { message: 'Cannot deflect after defending cards' });
+            return;
+        }
+        
+        const defender = room.players.find(p => p.id === socket.id);
+        const nextDefender = getNextActivePlayer(room, socket.id);
+        
+        if (!nextDefender) {
+            socket.emit('error', { message: 'Cannot deflect - no next player to defend' });
+            return;
+        }
+        
+        if (cardIndex >= defender.hand.length) return;
+        const deflectCard = defender.hand[cardIndex];
+        
+        // Check if deflect card has same rank as any undefended attack
+        let canDeflect = false;
+        for (let pair of room.battlefield) {
+            if (!pair.defense && pair.attack.rank === deflectCard.rank) {
+                canDeflect = true;
+                break;
+            }
+        }
+        
+        if (!canDeflect) {
+            socket.emit('error', { message: 'You can only deflect with cards of the same rank' });
+            return;
+        }
+        
+        // Check if total attacks don't exceed next defender's hand size
+        const totalAttacks = room.battlefield.length + 1;
+        if (totalAttacks > Math.min(MAX_BATTLEFIELD_SIZE, nextDefender.hand.length)) {
+            socket.emit('error', { message: 'Cannot deflect - would exceed card limit for next defender' });
+            return;
+        }
+        
+        // Add deflect card to battlefield as new attack
+        room.battlefield.push({ 
+            attack: deflectCard, 
+            defense: null,
+            attackerId: socket.id 
+        });
+        defender.hand.splice(cardIndex, 1);
+        
+        // Update defender to next player
+        room.currentDefenderId = nextDefender.id;
+        
+        // Update who can attack (everyone except new defender)
+        room.additionalAttackers = getAttackers(room).filter(p => p.id !== room.initialAttackerId).map(p => p.id);
+        
+        // Stay in defending phase
+        room.gamePhase = 'defending';
+        
+        // Notify all players
+        room.players.forEach(p => {
+            io.to(p.id).emit('attackDeflected', {
+                gameState: getSafeGameState(room, p.id),
+                deflectedBy: defender.name,
+                newDefender: nextDefender.name,
+                card: deflectCard
+            });
+        });
+        
+        checkForWinner(room, defender);
+    });
+    
+    // Take cards
     socket.on('takeCards', () => {
         const roomCode = playerRooms.get(socket.id);
         const room = gameRooms.get(roomCode);
         
         if (!room || room.gameState !== 'playing') return;
-        if (room.currentDefender !== socket.id) return;
+        if (room.currentDefenderId !== socket.id) return;
         
         const defender = room.players.find(p => p.id === socket.id);
-        const attacker = room.players.find(p => p.id === room.currentAttacker);
         
         // Calculate how many cards the defender will take initially
         const initialDefenderCards = defender.hand.length;
         const battlefieldCards = room.battlefield.length;
         
         // Maximum total cards that can be given is min(6, initial defender hand size)
-        room.maxThrowInTotal = Math.min(6, initialDefenderCards);
+        room.maxThrowInTotal = Math.min(MAX_BATTLEFIELD_SIZE, initialDefenderCards);
         
         // Collect valid ranks for throw-in
         room.validThrowInRanks.clear();
@@ -463,7 +575,7 @@ io.on('connection', (socket) => {
         // Enter throw-in phase
         room.gamePhase = 'throwIn';
         room.throwInCards = [];
-        room.throwInDeadline = Date.now() + 3000; // 3 seconds from now
+        room.throwInDeadline = Date.now() + 3000;
         
         // Calculate remaining throw-in capacity
         const remainingCapacity = room.maxThrowInTotal - battlefieldCards;
@@ -494,7 +606,7 @@ io.on('connection', (socket) => {
         const room = gameRooms.get(roomCode);
         
         if (!room || room.gameState !== 'playing') return;
-        if (room.currentAttacker !== socket.id || room.gamePhase !== 'throwIn') return;
+        if (room.initialAttackerId !== socket.id || room.gamePhase !== 'throwIn') return;
         
         // Clear timer and complete take
         if (room.throwInTimer) {
@@ -505,16 +617,13 @@ io.on('connection', (socket) => {
         completeTakeCards(room);
     });
     
-    // End attack (only attacker can end after all defended or during their attacking phase)
+    // End attack
     socket.on('endAttack', () => {
         const roomCode = playerRooms.get(socket.id);
         const room = gameRooms.get(roomCode);
         
         if (!room || room.gameState !== 'playing') return;
-        if (room.currentAttacker !== socket.id) return;
-        
-        const attacker = room.players.find(p => p.id === socket.id);
-        const defender = room.players.find(p => p.id === room.currentDefender);
+        if (room.initialAttackerId !== socket.id) return;
         
         // Can end attack if:
         // 1. All attacks are defended (defender succeeded)
@@ -522,32 +631,7 @@ io.on('connection', (socket) => {
         if (room.gamePhase === 'attacking' || 
             (room.battlefield.length > 0 && room.battlefield.every(pair => pair.defense))) {
             
-            // Clear battlefield
-            room.battlefield = [];
-            room.throwInCards = [];
-            
-            // Draw cards (attacker first, then defender)
-            while (attacker.hand.length < 6 && room.deck.length > 0) {
-                attacker.hand.push(room.deck.pop());
-            }
-            while (defender.hand.length < 6 && room.deck.length > 0) {
-                defender.hand.push(room.deck.pop());
-            }
-            
-            // Switch roles
-            const temp = room.currentAttacker;
-            room.currentAttacker = room.currentDefender;
-            room.currentDefender = temp;
-            room.gamePhase = 'attacking';
-            
-            // Notify all players
-            room.players.forEach(p => {
-                io.to(p.id).emit('attackEnded', {
-                    gameState: getSafeGameState(room, p.id)
-                });
-            });
-            
-            checkGameEnd(room);
+            completeSuccessfulDefense(room);
         }
     });
     
@@ -597,51 +681,18 @@ io.on('connection', (socket) => {
                         gameRooms.delete(roomCode);
                         console.log(`Room ${roomCode} deleted (all players disconnected)`);
                     }
-                }, 30000); // Wait 30 seconds before cleaning up
+                }, 30000);
             }
         }
         
         playerRooms.delete(socket.id);
         console.log('Player disconnected:', socket.id);
     });
-    
-    // Reconnect to room
-    socket.on('reconnect', (data) => {
-        const { roomCode, playerId } = data;
-        const room = gameRooms.get(roomCode);
-        
-        if (room) {
-            const player = room.players.find(p => p.id === playerId);
-            if (player) {
-                // Update player's socket ID
-                const oldId = player.id;
-                player.id = socket.id;
-                player.connected = true;
-                
-                playerRooms.delete(oldId);
-                playerRooms.set(socket.id, roomCode);
-                socket.join(roomCode);
-                
-                // Send current game state
-                socket.emit('reconnected', {
-                    gameState: getSafeGameState(room, socket.id)
-                });
-                
-                // Notify others
-                socket.to(roomCode).emit('playerReconnected', {
-                    playerName: player.name
-                });
-                
-                console.log(`Player ${player.name} reconnected to room ${roomCode}`);
-            }
-        }
-    });
 });
 
 // Helper function to complete taking cards after throw-in
 function completeTakeCards(room) {
-    const defender = room.players.find(p => p.id === room.currentDefender);
-    const attacker = room.players.find(p => p.id === room.currentAttacker);
+    const defender = room.players.find(p => p.id === room.currentDefenderId);
     
     // Defender takes all cards from battlefield and throw-in pile
     room.battlefield.forEach(pair => {
@@ -650,23 +701,39 @@ function completeTakeCards(room) {
     });
     
     // Add throw-in cards
-    room.throwInCards.forEach(card => {
-        defender.hand.push(card);
+    room.throwInCards.forEach(item => {
+        defender.hand.push(item.card);
     });
+    
+    const totalCardsTaken = room.battlefield.length * (room.battlefield.some(p => p.defense) ? 2 : 1) + room.throwInCards.length;
     
     room.battlefield = [];
     room.throwInCards = [];
     room.validThrowInRanks.clear();
     
-    // Draw cards (attacker draws first)
-    while (attacker.hand.length < 6 && room.deck.length > 0) {
-        attacker.hand.push(room.deck.pop());
-    }
-    while (defender.hand.length < 6 && room.deck.length > 0) {
-        defender.hand.push(room.deck.pop());
+    // Draw cards for all players who attacked
+    const attackers = new Set();
+    room.battlefield.forEach(pair => {
+        if (pair.attackerId) attackers.add(pair.attackerId);
+    });
+    room.throwInCards.forEach(item => {
+        if (item.playerId) attackers.add(item.playerId);
+    });
+    
+    // Draw cards in clockwise order starting with initial attacker
+    const initialAttacker = room.players.find(p => p.id === room.initialAttackerId);
+    if (initialAttacker) {
+        drawCardsForPlayer(room, initialAttacker);
     }
     
-    // Attacker continues
+    // Draw for other attackers
+    room.players.forEach(player => {
+        if (player.id !== room.initialAttackerId && player.id !== room.currentDefenderId) {
+            drawCardsForPlayer(room, player);
+        }
+    });
+    
+    // Initial attacker continues
     room.gamePhase = 'attacking';
     room.throwInDeadline = null;
     
@@ -674,11 +741,102 @@ function completeTakeCards(room) {
     room.players.forEach(p => {
         io.to(p.id).emit('cardsTaken', {
             gameState: getSafeGameState(room, p.id),
-            totalCards: room.battlefield.length + room.throwInCards.length
+            totalCards: totalCardsTaken
         });
     });
     
     checkGameEnd(room);
+}
+
+// Helper function for successful defense
+function completeSuccessfulDefense(room) {
+    // Clear battlefield
+    room.battlefield = [];
+    room.throwInCards = [];
+    
+    // Draw cards for all active players in clockwise order
+    const defender = room.players.find(p => p.id === room.currentDefenderId);
+    const initialAttacker = room.players.find(p => p.id === room.initialAttackerId);
+    
+    // Draw for initial attacker first
+    if (initialAttacker) {
+        drawCardsForPlayer(room, initialAttacker);
+    }
+    
+    // Draw for other players in clockwise order
+    room.players.forEach(player => {
+        if (player.id !== room.initialAttackerId && player.isActive && !player.hasWon) {
+            drawCardsForPlayer(room, player);
+        }
+    });
+    
+    // Defender becomes new attacker, next player defends
+    if (defender) {
+        room.initialAttackerId = defender.id;
+        const nextDefender = getNextActivePlayer(room, defender.id);
+        
+        if (nextDefender) {
+            room.currentDefenderId = nextDefender.id;
+            room.additionalAttackers = getAttackers(room).filter(p => p.id !== room.initialAttackerId).map(p => p.id);
+        }
+    }
+    
+    room.gamePhase = 'attacking';
+    
+    // Notify all players
+    room.players.forEach(p => {
+        io.to(p.id).emit('attackEnded', {
+            gameState: getSafeGameState(room, p.id)
+        });
+    });
+    
+    checkGameEnd(room);
+}
+
+// Draw cards for a player
+function drawCardsForPlayer(room, player) {
+    while (player.hand.length < INITIAL_HAND_SIZE && room.deck.length > 0) {
+        const card = room.deck.pop();
+        card.isTrump = card.suit === room.trumpSuit;
+        player.hand.push(card);
+    }
+}
+
+// Check if player has won (no cards left)
+function checkForWinner(room, player) {
+    if (player.hand.length === 0 && room.deck.length === 0) {
+        player.hasWon = true;
+        player.isActive = false;
+        room.winners.push({
+            id: player.id,
+            name: player.name,
+            position: room.winners.length + 1
+        });
+        
+        // Notify all players
+        room.players.forEach(p => {
+            io.to(p.id).emit('playerWon', {
+                playerId: player.id,
+                playerName: player.name,
+                position: room.winners.length
+            });
+        });
+        
+        // If this was the defender or attacker, need to reassign
+        if (player.id === room.currentDefenderId) {
+            const nextDefender = getNextActivePlayer(room, player.id);
+            if (nextDefender) {
+                room.currentDefenderId = nextDefender.id;
+            }
+        } else if (player.id === room.initialAttackerId) {
+            const nextAttacker = getNextActivePlayer(room, player.id);
+            if (nextAttacker) {
+                room.initialAttackerId = nextAttacker.id;
+            }
+        }
+        
+        updatePlayerOrder(room);
+    }
 }
 
 // Helper function to check if a card can defend
@@ -696,23 +854,32 @@ function canDefend(defenseCard, attackCard) {
 
 // Check for game end
 function checkGameEnd(room) {
+    const activePlayers = room.players.filter(p => p.isActive && !p.hasWon);
+    
     if (room.deck.length === 0) {
-        const playersWithCards = room.players.filter(p => p.hand.length > 0);
+        // Check if only one player has cards left
+        const playersWithCards = activePlayers.filter(p => p.hand.length > 0);
         
-        if (playersWithCards.length === 0) {
+        if (playersWithCards.length <= 1) {
             room.gameState = 'finished';
-            io.to(room.code).emit('gameDraw');
-        } else if (playersWithCards.length === 1) {
-            room.gameState = 'finished';
-            const loser = playersWithCards[0];
-            const winner = room.players.find(p => p.id !== loser.id);
             
-            io.to(room.code).emit('gameOver', {
-                winner: winner.id,
-                winnerName: winner.name,
-                loser: loser.id,
-                loserName: loser.name
-            });
+            // Last player with cards is the Durak (loser)
+            if (playersWithCards.length === 1) {
+                const durak = playersWithCards[0];
+                
+                io.to(room.code).emit('gameOver', {
+                    durak: {
+                        id: durak.id,
+                        name: durak.name
+                    },
+                    winners: room.winners
+                });
+            } else {
+                // Everyone ran out of cards at the same time (very rare)
+                io.to(room.code).emit('gameDraw', {
+                    winners: room.winners
+                });
+            }
         }
     }
 }
