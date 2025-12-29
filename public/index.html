@@ -668,7 +668,6 @@
         </div>
 
         <div class="controls">
-            <button id="passBtn" onclick="pass()" disabled>Pass</button>
             <button id="takeBtn" onclick="takeCards()" disabled>Take Cards</button>
             <button id="deflectBtn" onclick="toggleDeflectMode()" disabled>Deflect Attack</button>
             <button id="endAttackBtn" onclick="endAttack()" disabled>End Attack</button>
@@ -768,6 +767,15 @@
                 gameState = data.gameState;
                 deflectMode = false; // Reset deflect mode
                 updateGameDisplay();
+                
+                // Show message for successful defense
+                if (data.action === 'defend' && data.allDefended) {
+                    if (gameState.currentAttacker === socket.id) {
+                        showMessage('All attacks defended! Continue or end your turn.', 'info');
+                    } else {
+                        showMessage('Successfully defended all attacks!', 'success');
+                    }
+                }
             });
             
             socket.on('attackDeflected', (data) => {
@@ -778,7 +786,7 @@
                 if (gameState.currentDefender === socket.id) {
                     showMessage(`${data.deflectedBy} deflected the attack back to you! Defend against all cards!`, 'error');
                 } else {
-                    showMessage(`You deflected the attack! ${data.deflectedBy === playerInfo.name ? 'Your opponent' : data.deflectedBy} must now defend!`, 'success');
+                    showMessage(`You deflected the attack! Opponent must now defend!`, 'success');
                 }
             });
             
@@ -811,17 +819,19 @@
                 showMessage(`Cards taken! (${data.totalCards} total)`, 'info');
             });
             
+            // Keep both for backward compatibility
             socket.on('passed', (data) => {
                 gameState = data.gameState;
-                deflectMode = false; // Reset deflect mode
+                deflectMode = false;
                 updateGameDisplay();
-                showMessage('Defense successful!', 'success');
+                showMessage('Defense successful! Roles switched.', 'success');
             });
             
             socket.on('attackEnded', (data) => {
                 gameState = data.gameState;
-                deflectMode = false; // Reset deflect mode
+                deflectMode = false;
                 updateGameDisplay();
+                showMessage('Attack ended! Roles switched.', 'info');
             });
             
             socket.on('gameOver', (data) => {
@@ -1017,27 +1027,46 @@
                         turnAction.textContent = 'Select a card to attack';
                     }
                 } else if (gameState.gamePhase === 'defending') {
-                    turnText.textContent = '⏳ Waiting for Defense';
-                    turnAction.textContent = `${opponent.name} is defending...`;
-                    turnIndicator.classList.remove('your-turn');
-                    turnIndicator.classList.add('opponent-turn');
-                    opponentArea.classList.add('defending-player');
+                    // Check if all attacks are defended
+                    const allDefended = gameState.battlefield && 
+                                      gameState.battlefield.length > 0 && 
+                                      gameState.battlefield.every(pair => pair.defense);
+                    
+                    if (allDefended) {
+                        // Attacker needs to decide to continue or end
+                        turnText.textContent = '⚔️ YOUR TURN - Continue?';
+                        turnAction.textContent = 'All defended! Add more attacks or end turn';
+                        turnIndicator.classList.add('your-turn');
+                        playerArea.classList.add('active-player');
+                        opponentArea.classList.remove('defending-player');
+                    } else {
+                        // Waiting for defender to defend
+                        turnText.textContent = '⏳ Waiting for Defense';
+                        turnAction.textContent = `${opponent.name} is defending...`;
+                        turnIndicator.classList.remove('your-turn');
+                        turnIndicator.classList.add('opponent-turn');
+                        opponentArea.classList.add('defending-player');
+                    }
                 }
             } else if (gameState.currentDefender === socket.id) {
                 if (gameState.gamePhase === 'defending') {
-                    turnIndicator.classList.add('defend');
-                    turnText.textContent = '🛡️ YOUR TURN - Defend!';
                     const undefended = gameState.battlefield ? gameState.battlefield.filter(p => !p.defense).length : 0;
                     if (undefended > 0) {
+                        turnIndicator.classList.add('defend');
+                        turnText.textContent = '🛡️ YOUR TURN - Defend!';
                         turnAction.textContent = `Defend ${undefended} attack${undefended !== 1 ? 's' : ''} or take cards`;
+                        playerArea.classList.add('defending-player');
                     } else {
-                        turnAction.textContent = 'All attacks defended - Pass or wait';
+                        // Should not happen - game phase should switch to attacking when all defended
+                        turnIndicator.classList.add('opponent-turn');
+                        turnText.textContent = '⏳ Waiting...';
+                        turnAction.textContent = 'Waiting for attacker...';
                     }
-                    playerArea.classList.add('defending-player');
                 } else if (gameState.gamePhase === 'attacking') {
+                    // Defender waiting for attacker to continue or end
                     turnIndicator.classList.add('opponent-turn');
-                    turnText.textContent = `⏳ ${opponent.name}'s Turn`;
-                    turnAction.textContent = 'Waiting for attack...';
+                    turnText.textContent = '✅ Defense Successful!';
+                    turnAction.textContent = `Waiting for ${opponent.name} to continue or end attack...`;
                     opponentArea.classList.add('active-player');
                 }
             } else {
@@ -1249,12 +1278,6 @@
             updateGameDisplay();
         }
         
-        function pass() {
-            if (!socket) return;
-            deflectMode = false;
-            socket.emit('pass');
-        }
-        
         function takeCards() {
             if (!socket) return;
             deflectMode = false;
@@ -1267,12 +1290,10 @@
         }
         
         function updateButtonStates() {
-            const passBtn = document.getElementById('passBtn');
             const takeBtn = document.getElementById('takeBtn');
             const endAttackBtn = document.getElementById('endAttackBtn');
             const deflectBtn = document.getElementById('deflectBtn');
             
-            passBtn.disabled = true;
             takeBtn.disabled = true;
             endAttackBtn.disabled = true;
             deflectBtn.disabled = true;
@@ -1304,16 +1325,21 @@
                     }
                 }
                 
-                if (gameState.battlefield && gameState.battlefield.every(pair => pair.defense)) {
-                    passBtn.disabled = false;
-                } else {
+                // Can only take cards if there are undefended attacks
+                if (gameState.battlefield && gameState.battlefield.some(pair => !pair.defense)) {
                     takeBtn.disabled = false;
                 }
+                // If all attacks are defended, defender just waits for attacker to continue or end
             }
             
-            if (gameState.currentAttacker === socket.id && gameState.gamePhase === 'attacking' && 
-                gameState.battlefield && gameState.battlefield.length > 0) {
-                endAttackBtn.disabled = false;
+            // Attacker can end attack if they've played cards and either:
+            // 1. All cards are defended (defender succeeded)
+            // 2. It's their turn in attacking phase after playing
+            if (gameState.currentAttacker === socket.id && gameState.battlefield && gameState.battlefield.length > 0) {
+                if (gameState.gamePhase === 'attacking' || 
+                    (gameState.gamePhase === 'defending' && gameState.battlefield.every(pair => pair.defense))) {
+                    endAttackBtn.disabled = false;
+                }
             }
         }
         
