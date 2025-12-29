@@ -101,6 +101,23 @@
             border-radius: 8px;
         }
 
+        .player-status {
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.9em;
+        }
+
+        .player-status.ready {
+            background: #d4edda;
+            color: #155724;
+            font-weight: bold;
+        }
+
+        .player-status.waiting {
+            background: #f8f9fa;
+            color: #6c757d;
+        }
+
         button {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -688,6 +705,13 @@
             });
             
             socket.on('playerReadyUpdate', (data) => {
+                // Update the specific player's ready state
+                if (gameState && data.playerId) {
+                    const player = gameState.players.find(p => p.id === data.playerId);
+                    if (player) {
+                        player.ready = data.ready;
+                    }
+                }
                 updatePlayersList();
             });
             
@@ -835,19 +859,29 @@
                 const statusSpan = document.createElement('span');
                 statusSpan.className = `player-status ${player.ready ? 'ready' : 'waiting'}`;
                 statusSpan.textContent = player.ready ? 'Ready' : 'Waiting';
+                statusSpan.style.color = player.ready ? '#28a745' : '#6c757d';
+                statusSpan.style.fontWeight = player.ready ? 'bold' : 'normal';
                 
                 playerDiv.appendChild(nameSpan);
                 playerDiv.appendChild(statusSpan);
                 playersList.appendChild(playerDiv);
             });
             
-            // Update ready button
+            // Update ready button - check if current player is ready
             const readyBtn = document.getElementById('readyBtn');
+            const currentPlayer = gameState.players.find(p => p.id === socket.id);
             const minPlayers = 2;
-            if (gameState.players.length >= minPlayers) {
+            
+            if (currentPlayer && currentPlayer.ready) {
+                // Player is already ready
+                readyBtn.disabled = true;
+                readyBtn.textContent = 'Waiting for others...';
+            } else if (gameState.players.length >= minPlayers) {
+                // Player can click ready
                 readyBtn.disabled = false;
                 readyBtn.textContent = 'Ready to Start';
             } else {
+                // Need more players
                 readyBtn.disabled = true;
                 readyBtn.textContent = `Need ${minPlayers - gameState.players.length} more player(s)`;
             }
@@ -855,9 +889,22 @@
         
         function playerReady() {
             if (!socket) return;
+            
+            // Update UI immediately for better responsiveness
+            const readyBtn = document.getElementById('readyBtn');
+            readyBtn.disabled = true;
+            readyBtn.textContent = 'Waiting for others...';
+            
+            // Mark current player as ready in local state
+            if (gameState) {
+                const currentPlayer = gameState.players.find(p => p.id === socket.id);
+                if (currentPlayer) {
+                    currentPlayer.ready = true;
+                }
+                updatePlayersList(); // Update the display with new ready status
+            }
+            
             socket.emit('playerReady');
-            document.getElementById('readyBtn').disabled = true;
-            document.getElementById('readyBtn').textContent = 'Waiting for others...';
         }
         
         function leaveRoom() {
