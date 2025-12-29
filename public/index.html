@@ -354,11 +354,14 @@
         .player-slot {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 15px;
-            padding: 12px;
+            padding: 10px;
             box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
             transition: all 0.3s ease;
             min-width: 180px;
             max-width: 250px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
 
         .player-slot.position-circle {
@@ -396,21 +399,24 @@
         .player-slot.current-player {
             background: linear-gradient(135deg, #f0f0f0 0%, #ffffff 100%);
             border: 3px solid #007bff;
-            min-width: 260px;
+            min-width: 240px;
+            padding: 12px;
         }
 
         .player-name {
             font-weight: bold;
-            margin-bottom: 10px;
+            margin-bottom: 3px;
             text-align: center;
-            font-size: 1.1em;
+            font-size: 1em;
         }
 
         .player-cards {
             display: flex;
             justify-content: center;
-            min-height: 80px;
+            min-height: 75px;
             position: relative;
+            overflow: visible;
+            padding: 5px 0;
         }
         
         /* Overlapping cards for better space usage */
@@ -419,7 +425,7 @@
         }
         
         .player-cards.hand-style .card {
-            margin-left: -25px;
+            margin-left: -30px;
             transition: all 0.3s ease;
         }
         
@@ -432,15 +438,15 @@
             z-index: 100;
         }
         
-        /* Current player's hand spreads more horizontally */
+        /* Current player's hand spreads more for visibility */
         .current-player .player-cards.hand-style .card {
-            margin-left: -20px;
+            margin-left: -25px;
         }
 
         /* Larger cards for better visibility */
         .card {
-            width: 55px;
-            height: 75px;
+            width: 50px;
+            height: 70px;
             background: white;
             border: 2px solid #333;
             border-radius: 6px;
@@ -448,18 +454,19 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            font-size: 1.2em;
+            font-size: 1.1em;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.3s ease;
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            flex-shrink: 0;
         }
 
-        /* Current player's cards are even larger */
+        /* Current player's cards are larger */
         .current-player .card {
-            width: 65px;
-            height: 90px;
-            font-size: 1.4em;
+            width: 55px;
+            height: 75px;
+            font-size: 1.2em;
         }
 
         .card:hover {
