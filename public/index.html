@@ -84,6 +84,50 @@
             letter-spacing: 3px;
         }
 
+        .room-code-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 10px;
+            font-weight: bold;
+            z-index: 100;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .room-code-badge:hover {
+            background: rgba(0, 0, 0, 0.95);
+            transform: scale(1.05);
+        }
+
+        .spectator-list {
+            position: absolute;
+            top: 50px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 12px;
+            border-radius: 8px;
+            max-width: 200px;
+            z-index: 10;
+            font-size: 0.9em;
+        }
+
+        .spectator-list h4 {
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .spectator-item {
+            padding: 4px;
+            margin: 3px 0;
+            background: #f0f0f0;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+
         .players-list {
             background: #f0f0f0;
             border-radius: 10px;
@@ -116,6 +160,11 @@
         .player-status.waiting {
             background: #f8f9fa;
             color: #6c757d;
+        }
+
+        .player-status.spectating {
+            background: #cfe2ff;
+            color: #084298;
         }
 
         button {
@@ -207,8 +256,15 @@
         }
 
         .player-slot.winner {
-            opacity: 0.5;
+            opacity: 0.7;
             background: #d4edda;
+            border: 2px solid #28a745;
+        }
+
+        .player-slot.spectator {
+            opacity: 0.6;
+            background: #cfe2ff;
+            border: 2px solid #0d6efd;
         }
 
         .player-slot.current-player {
@@ -392,6 +448,10 @@
             animation: pulse 1.5s infinite;
         }
 
+        .turn-indicator.spectating {
+            background: rgba(13, 110, 253, 0.9);
+        }
+
         @keyframes pulse {
             0% { transform: translateX(-50%) scale(1); }
             50% { transform: translateX(-50%) scale(1.05); }
@@ -401,7 +461,7 @@
         /* Winners Display */
         .winners-display {
             position: absolute;
-            top: 60px;
+            top: 90px;
             right: 20px;
             background: rgba(255, 255, 255, 0.95);
             padding: 12px;
@@ -487,6 +547,57 @@
             margin: 20px 0;
         }
 
+        /* Voting Modal */
+        .voting-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.98);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            z-index: 1000;
+            min-width: 400px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .voting-modal h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .voting-buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 30px;
+        }
+
+        .vote-status {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f0f0f0;
+            border-radius: 10px;
+        }
+
+        .vote-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 10px;
+            margin: 3px 0;
+            background: white;
+            border-radius: 5px;
+        }
+
+        .vote-yes {
+            color: #28a745;
+        }
+
+        .vote-no {
+            color: #dc3545;
+        }
+
         .message {
             position: absolute;
             top: 50px;
@@ -540,7 +651,7 @@
     <!-- Lobby Screen -->
     <div id="lobbyScreen" class="lobby-container">
         <h1>🃏 Durak Multiplayer 🃏</h1>
-        <p style="color: #666; margin-bottom: 20px;">2-6 Players</p>
+        <p style="color: #666; margin-bottom: 20px;">2-6 Players + Spectators</p>
         
         <div id="nameEntry">
             <div class="input-group">
@@ -575,9 +686,10 @@
             <div class="room-code-display" id="roomCodeDisplay">ABCD12</div>
             <p class="waiting-message">Share this code with friends to start playing!</p>
             <p id="playerCount" style="color: #666;"></p>
+            <p id="roundInfo" style="color: #666; font-weight: bold;"></p>
             
             <div class="players-list">
-                <h3>Players</h3>
+                <h3>Players & Spectators</h3>
                 <div id="playersList"></div>
             </div>
             
@@ -588,19 +700,29 @@
 
     <!-- Game Screen -->
     <div id="gameScreen" class="game-container hidden">
+        <div class="room-code-badge" onclick="copyRoomCode()" title="Click to copy room code">
+            Room: <span id="gameRoomCodeBadge">-</span>
+        </div>
+        
         <div class="game-table">
             <div id="turnIndicator" class="turn-indicator" style="position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000;">
                 <div id="turnText">Waiting...</div>
             </div>
             
             <div class="top-info" style="margin-top: 45px;">
-                <div class="info-box">Room: <span id="gameRoomCode">-</span></div>
+                <div class="info-box">Round: <span id="roundNumber">1</span></div>
                 <div class="info-box">Trump: <span id="trumpSuit">-</span></div>
                 <div class="info-box">Deck: <span id="deckCount">36</span></div>
                 <div class="info-box">Players: <span id="activePlayerCount">-</span></div>
+                <div class="info-box">Spectators: <span id="spectatorCount">0</span></div>
             </div>
             
             <div id="gameMessage" class="message hidden"></div>
+            
+            <div id="spectatorList" class="spectator-list hidden">
+                <h4>👁️ Spectators</h4>
+                <div id="spectatorNames"></div>
+            </div>
             
             <div class="players-circle" id="playersCircle">
                 <!-- Player slots will be dynamically added here -->
@@ -658,6 +780,22 @@
         <button id="finishThrowInBtn" onclick="finishThrowIn()" style="display: none;">Done Adding</button>
     </div>
 
+    <!-- Voting Modal -->
+    <div id="votingModal" class="voting-modal hidden">
+        <h2 id="votingTitle">Game Over!</h2>
+        <p id="votingResult"></p>
+        <p style="margin-top: 20px; font-size: 1.2em;">Play again?</p>
+        <div id="votingButtons" class="voting-buttons">
+            <button onclick="votePlayAgain(true)" style="background: #28a745;">Yes! 👍</button>
+            <button onclick="votePlayAgain(false)" style="background: #dc3545;">No Thanks 👋</button>
+        </div>
+        <div id="voteStatus" class="vote-status hidden">
+            <h4>Votes:</h4>
+            <div id="voteList"></div>
+        </div>
+        <div id="voteTimer" style="margin-top: 10px; color: #666;"></div>
+    </div>
+
     <script>
         // Socket connection
         let socket = null;
@@ -670,6 +808,8 @@
         let myHand = [];
         let deflectMode = false;
         let throwInInterval = null;
+        let voteCountdown = null;
+        let isSpectator = false;
         
         // Connect to server
         function connectToServer() {
@@ -694,10 +834,27 @@
                 updatePlayersList();
             });
             
+            socket.on('roomJoined', (data) => {
+                gameState = data.gameState;
+                document.getElementById('roomCodeDisplay').textContent = roomInfo.code;
+                showWaitingRoom();
+                updatePlayersList();
+                
+                // Check if we're a spectator
+                const me = gameState.players.find(p => p.id === socket.id);
+                if (me && me.isSpectator) {
+                    isSpectator = true;
+                    showMessage('Joined as spectator. Wait for the next round!', 'info');
+                }
+            });
+            
             socket.on('playerJoined', (data) => {
                 gameState = data.gameState;
                 updatePlayersList();
-                showMessage('A player joined the room!', 'info');
+                const msg = data.isSpectator 
+                    ? `${data.playerName} joined as spectator!` 
+                    : `${data.playerName} joined the room!`;
+                showMessage(msg, 'info');
             });
             
             socket.on('error', (data) => {
@@ -769,8 +926,35 @@
             });
             
             socket.on('gameOver', (data) => {
-                showMessage(`Game Over! ${data.durak.name} is the Durak!`, 'error');
-                setTimeout(() => leaveGame(), 5000);
+                gameState.gameState = 'voting';
+                hideThrowInTimer();
+                updateGameDisplay();
+                showVotingModal(data);
+            });
+            
+            socket.on('playerVoted', (data) => {
+                updateVoteDisplay(data);
+            });
+            
+            socket.on('newGameStarting', (data) => {
+                gameState = data.gameState;
+                isSpectator = false;
+                hideVotingModal();
+                showMessage(`New round starting! ${data.yesVotes} players voted yes.`, 'success');
+                
+                setTimeout(() => {
+                    document.getElementById('gameScreen').classList.add('hidden');
+                    document.getElementById('lobbyScreen').classList.remove('hidden');
+                    showWaitingRoom();
+                    updatePlayersList();
+                }, 2000);
+            });
+            
+            socket.on('votingComplete', (data) => {
+                if (data.result === 'ended') {
+                    showMessage(`Not enough votes to continue. Thanks for playing!`, 'info');
+                    setTimeout(() => leaveGame(), 3000);
+                }
             });
             
             socket.on('gameDraw', () => {
@@ -784,6 +968,14 @@
             
             socket.on('playerDisconnected', (data) => {
                 showMessage(`${data.playerName} disconnected`, 'error');
+            });
+        }
+        
+        // Copy room code to clipboard
+        function copyRoomCode() {
+            const code = document.getElementById('gameRoomCodeBadge').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                showMessage('Room code copied!', 'success');
             });
         }
         
@@ -832,12 +1024,15 @@
             
             roomInfo.code = roomCode;
             document.getElementById('roomCodeDisplay').textContent = roomCode;
-            showWaitingRoom();
         }
         
         function showWaitingRoom() {
             document.getElementById('roomOptions').classList.add('hidden');
             document.getElementById('waitingRoom').classList.remove('hidden');
+            
+            if (gameState && gameState.roundNumber > 1) {
+                document.getElementById('roundInfo').textContent = `Round ${gameState.roundNumber}`;
+            }
         }
         
         function updatePlayersList() {
@@ -846,10 +1041,14 @@
             const playersList = document.getElementById('playersList');
             playersList.innerHTML = '';
             
-            document.getElementById('playerCount').textContent = 
-                `${gameState.players.length}/${gameState.maxPlayers} players`;
+            const activePlayers = gameState.players.filter(p => !p.isSpectator);
+            const spectators = gameState.players.filter(p => p.isSpectator);
             
-            gameState.players.forEach(player => {
+            document.getElementById('playerCount').textContent = 
+                `${activePlayers.length}/${gameState.maxPlayers} players, ${spectators.length} spectator${spectators.length !== 1 ? 's' : ''}`;
+            
+            // Show active players
+            activePlayers.forEach(player => {
                 const playerDiv = document.createElement('div');
                 playerDiv.className = 'player-item';
                 
@@ -859,36 +1058,51 @@
                 const statusSpan = document.createElement('span');
                 statusSpan.className = `player-status ${player.ready ? 'ready' : 'waiting'}`;
                 statusSpan.textContent = player.ready ? 'Ready' : 'Waiting';
-                statusSpan.style.color = player.ready ? '#28a745' : '#6c757d';
-                statusSpan.style.fontWeight = player.ready ? 'bold' : 'normal';
                 
                 playerDiv.appendChild(nameSpan);
                 playerDiv.appendChild(statusSpan);
                 playersList.appendChild(playerDiv);
             });
             
-            // Update ready button - check if current player is ready
+            // Show spectators
+            spectators.forEach(player => {
+                const playerDiv = document.createElement('div');
+                playerDiv.className = 'player-item';
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = '👁️ ' + player.name + (player.id === socket.id ? ' (You)' : '');
+                
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'player-status spectating';
+                statusSpan.textContent = 'Spectating';
+                
+                playerDiv.appendChild(nameSpan);
+                playerDiv.appendChild(statusSpan);
+                playersList.appendChild(playerDiv);
+            });
+            
+            // Update ready button
             const readyBtn = document.getElementById('readyBtn');
             const currentPlayer = gameState.players.find(p => p.id === socket.id);
             const minPlayers = 2;
             
-            if (currentPlayer && currentPlayer.ready) {
-                // Player is already ready
+            if (!currentPlayer || currentPlayer.isSpectator) {
+                readyBtn.disabled = true;
+                readyBtn.textContent = 'Spectating - Wait for next round';
+            } else if (currentPlayer.ready) {
                 readyBtn.disabled = true;
                 readyBtn.textContent = 'Waiting for others...';
-            } else if (gameState.players.length >= minPlayers) {
-                // Player can click ready
+            } else if (activePlayers.length >= minPlayers) {
                 readyBtn.disabled = false;
                 readyBtn.textContent = 'Ready to Start';
             } else {
-                // Need more players
                 readyBtn.disabled = true;
-                readyBtn.textContent = `Need ${minPlayers - gameState.players.length} more player(s)`;
+                readyBtn.textContent = `Need ${minPlayers - activePlayers.length} more player(s)`;
             }
         }
         
         function playerReady() {
-            if (!socket) return;
+            if (!socket || isSpectator) return;
             
             // Update UI immediately for better responsiveness
             const readyBtn = document.getElementById('readyBtn');
@@ -901,7 +1115,7 @@
                 if (currentPlayer) {
                     currentPlayer.ready = true;
                 }
-                updatePlayersList(); // Update the display with new ready status
+                updatePlayersList();
             }
             
             socket.emit('playerReady');
@@ -919,11 +1133,20 @@
             document.getElementById('lobbyScreen').classList.add('hidden');
             document.getElementById('gameScreen').classList.remove('hidden');
             document.getElementById('chatContainer').style.display = 'block';
-            document.getElementById('gameRoomCode').textContent = roomInfo.code;
+            document.getElementById('gameRoomCodeBadge').textContent = roomInfo.code;
+            document.getElementById('roundNumber').textContent = gameState.roundNumber || 1;
             
             createPlayerSlots();
             updateGameDisplay();
-            showMessage('Game started! Good luck!', 'success');
+            
+            const me = gameState.players.find(p => p.id === socket.id);
+            isSpectator = me && me.isSpectator;
+            
+            if (isSpectator) {
+                showMessage('You are spectating this round. Wait for the next game!', 'info');
+            } else {
+                showMessage('Game started! Good luck!', 'success');
+            }
         }
         
         function createPlayerSlots() {
@@ -932,52 +1155,54 @@
             
             if (!gameState) return;
             
-            const numPlayers = gameState.players.length;
+            // Only show non-spectator players in the game circle
+            const activePlayers = gameState.players.filter(p => !p.isSpectator);
+            const numPlayers = activePlayers.length;
             
             // Find current player's index
-            const currentPlayerIndex = gameState.players.findIndex(p => p.id === socket.id);
-            if (currentPlayerIndex === -1) return;
+            const currentPlayerIndex = activePlayers.findIndex(p => p.id === socket.id);
+            const isCurrentPlayerActive = currentPlayerIndex !== -1;
             
-            // Reorder players array so current player is first
+            // Reorder players array so current player is first (if they're playing)
             const reorderedPlayers = [];
-            for (let i = 0; i < numPlayers; i++) {
-                const index = (currentPlayerIndex + i) % numPlayers;
-                reorderedPlayers.push(gameState.players[index]);
+            if (isCurrentPlayerActive) {
+                for (let i = 0; i < numPlayers; i++) {
+                    const index = (currentPlayerIndex + i) % numPlayers;
+                    reorderedPlayers.push(activePlayers[index]);
+                }
+            } else {
+                // If spectating, just show players in their original order
+                reorderedPlayers.push(...activePlayers);
             }
             
             // Position calculations based on number of players
             const positions = [];
             
             if (numPlayers === 2) {
-                // 2 players: bottom and top
-                positions.push({ x: 50, y: 85 }); // Current player at bottom
-                positions.push({ x: 50, y: 15 }); // Opponent at top
+                positions.push({ x: 50, y: isCurrentPlayerActive ? 85 : 50 });
+                positions.push({ x: 50, y: isCurrentPlayerActive ? 15 : 50 });
             } else if (numPlayers === 3) {
-                // 3 players: bottom, top-left, top-right
-                positions.push({ x: 50, y: 85 }); // Current player at bottom
-                positions.push({ x: 20, y: 20 }); // Top-left
-                positions.push({ x: 80, y: 20 }); // Top-right
+                positions.push({ x: 50, y: isCurrentPlayerActive ? 85 : 75 });
+                positions.push({ x: 20, y: 20 });
+                positions.push({ x: 80, y: 20 });
             } else if (numPlayers === 4) {
-                // 4 players: bottom, left, top, right
-                positions.push({ x: 50, y: 85 }); // Current player at bottom
-                positions.push({ x: 15, y: 50 }); // Left
-                positions.push({ x: 50, y: 15 }); // Top
-                positions.push({ x: 85, y: 50 }); // Right
+                positions.push({ x: 50, y: isCurrentPlayerActive ? 85 : 75 });
+                positions.push({ x: 15, y: 50 });
+                positions.push({ x: 50, y: 15 });
+                positions.push({ x: 85, y: 50 });
             } else if (numPlayers === 5) {
-                // 5 players: bottom, and 4 others spread around
-                positions.push({ x: 50, y: 85 }); // Current player at bottom
-                positions.push({ x: 15, y: 65 }); // Bottom-left
-                positions.push({ x: 15, y: 25 }); // Top-left
-                positions.push({ x: 50, y: 15 }); // Top
-                positions.push({ x: 85, y: 25 }); // Top-right
+                positions.push({ x: 50, y: isCurrentPlayerActive ? 85 : 75 });
+                positions.push({ x: 15, y: 65 });
+                positions.push({ x: 15, y: 25 });
+                positions.push({ x: 50, y: 15 });
+                positions.push({ x: 85, y: 25 });
             } else if (numPlayers === 6) {
-                // 6 players: bottom, and 5 others spread around
-                positions.push({ x: 50, y: 85 }); // Current player at bottom
-                positions.push({ x: 15, y: 70 }); // Bottom-left
-                positions.push({ x: 15, y: 35 }); // Left
-                positions.push({ x: 50, y: 15 }); // Top
-                positions.push({ x: 85, y: 35 }); // Right
-                positions.push({ x: 85, y: 70 }); // Bottom-right
+                positions.push({ x: 50, y: isCurrentPlayerActive ? 85 : 75 });
+                positions.push({ x: 15, y: 70 });
+                positions.push({ x: 15, y: 35 });
+                positions.push({ x: 50, y: 15 });
+                positions.push({ x: 85, y: 35 });
+                positions.push({ x: 85, y: 70 });
             }
             
             // Create slots for each player
@@ -993,9 +1218,8 @@
                 slot.style.transform = 'translate(-50%, -50%)';
                 
                 // Current player (always at index 0 after reordering)
-                if (index === 0) {
+                if (isCurrentPlayerActive && index === 0) {
                     slot.classList.add('current-player');
-                    // Make current player's slot slightly larger
                     slot.style.width = '180px';
                     slot.style.zIndex = '10';
                 }
@@ -1028,12 +1252,30 @@
             const me = gameState.players.find(p => p.id === socket.id);
             if (me) {
                 myHand = me.hand || [];
+                isSpectator = me.isSpectator;
             }
             
-            // Update active player count
-            const activePlayers = gameState.players.filter(p => p.isActive && !p.hasWon);
-            document.getElementById('activePlayerCount').textContent = 
-                `${activePlayers.length} active`;
+            // Update counts
+            const activePlayers = gameState.players.filter(p => p.isActive && !p.hasWon && !p.isSpectator);
+            const spectators = gameState.players.filter(p => p.isSpectator);
+            
+            document.getElementById('activePlayerCount').textContent = `${activePlayers.length} active`;
+            document.getElementById('spectatorCount').textContent = spectators.length;
+            
+            // Update spectator list
+            if (spectators.length > 0) {
+                document.getElementById('spectatorList').classList.remove('hidden');
+                const spectatorNames = document.getElementById('spectatorNames');
+                spectatorNames.innerHTML = '';
+                spectators.forEach(spec => {
+                    const div = document.createElement('div');
+                    div.className = 'spectator-item';
+                    div.textContent = spec.name + (spec.id === socket.id ? ' (You)' : '');
+                    spectatorNames.appendChild(div);
+                });
+            } else {
+                document.getElementById('spectatorList').classList.add('hidden');
+            }
             
             // Update trump and deck
             document.getElementById('trumpSuit').textContent = gameState.trumpSuit || '-';
@@ -1057,11 +1299,13 @@
             
             // Update each player's display
             gameState.players.forEach(player => {
+                if (player.isSpectator) return; // Don't show spectators in game circle
+                
                 const slot = document.getElementById(`player-${player.id}`);
                 if (!slot) return;
                 
                 // Clear and update classes
-                slot.classList.remove('active-attacker', 'defender', 'can-attack', 'winner');
+                slot.classList.remove('active-attacker', 'defender', 'can-attack', 'winner', 'spectator');
                 
                 if (player.hasWon) {
                     slot.classList.add('winner');
@@ -1075,36 +1319,40 @@
                 
                 // Update cards
                 const cardsDiv = document.getElementById(`cards-${player.id}`);
-                cardsDiv.innerHTML = '';
-                
-                if (player.hand && player.id === socket.id) {
-                    // Show own cards
-                    player.hand.forEach((card, index) => {
-                        const cardEl = createCard(card, index);
-                        cardsDiv.appendChild(cardEl);
-                    });
-                } else {
-                    // Show card backs for others
-                    for (let i = 0; i < player.cardCount; i++) {
-                        const cardEl = document.createElement('div');
-                        cardEl.className = 'card back';
-                        cardEl.innerHTML = '🃏';
-                        cardsDiv.appendChild(cardEl);
+                if (cardsDiv) {
+                    cardsDiv.innerHTML = '';
+                    
+                    if (player.hand && player.id === socket.id) {
+                        // Show own cards
+                        player.hand.forEach((card, index) => {
+                            const cardEl = createCard(card, index);
+                            cardsDiv.appendChild(cardEl);
+                        });
+                    } else {
+                        // Show card backs for others
+                        for (let i = 0; i < player.cardCount; i++) {
+                            const cardEl = document.createElement('div');
+                            cardEl.className = 'card back';
+                            cardEl.innerHTML = '🃏';
+                            cardsDiv.appendChild(cardEl);
+                        }
                     }
                 }
                 
                 // Update info
                 const infoDiv = document.getElementById(`info-${player.id}`);
-                if (player.hasWon) {
-                    infoDiv.textContent = '🏆 Winner!';
-                } else if (player.isDefender) {
-                    infoDiv.textContent = '🛡️ Defending';
-                } else if (player.isInitialAttacker) {
-                    infoDiv.textContent = '⚔️ Main Attacker';
-                } else if (player.canAttack) {
-                    infoDiv.textContent = '➕ Can Attack';
-                } else {
-                    infoDiv.textContent = '';
+                if (infoDiv) {
+                    if (player.hasWon) {
+                        infoDiv.textContent = '🏆 Winner!';
+                    } else if (player.isDefender) {
+                        infoDiv.textContent = '🛡️ Defending';
+                    } else if (player.isInitialAttacker) {
+                        infoDiv.textContent = '⚔️ Main Attacker';
+                    } else if (player.canAttack) {
+                        infoDiv.textContent = '➕ Can Attack';
+                    } else {
+                        infoDiv.textContent = '';
+                    }
                 }
             });
             
@@ -1187,11 +1435,14 @@
             const indicator = document.getElementById('turnIndicator');
             const turnText = document.getElementById('turnText');
             
-            indicator.classList.remove('your-turn', 'defend');
+            indicator.classList.remove('your-turn', 'defend', 'spectating');
             
             if (!gameState) return;
             
-            if (gameState.gamePhase === 'throwIn') {
+            if (isSpectator) {
+                indicator.classList.add('spectating');
+                turnText.textContent = '👁️ Spectating';
+            } else if (gameState.gamePhase === 'throwIn') {
                 turnText.textContent = 'Throw-in phase!';
                 if (gameState.initialAttackerId === socket.id || gameState.additionalAttackers.includes(socket.id)) {
                     indicator.classList.add('your-turn');
@@ -1220,7 +1471,7 @@
             deflectBtn.style.display = 'none';
             endAttackBtn.disabled = true;
             
-            if (!gameState || gameState.gameState !== 'playing') return;
+            if (isSpectator || !gameState || gameState.gameState !== 'playing') return;
             
             if (gameState.gamePhase === 'throwIn') {
                 return;
@@ -1275,7 +1526,7 @@
         }
         
         function selectCard(index) {
-            if (gameState.gameState !== 'playing') return;
+            if (isSpectator || gameState.gameState !== 'playing') return;
             
             selectedCard = index;
             
@@ -1297,12 +1548,13 @@
         }
         
         function takeCards() {
-            if (!socket) return;
+            if (!socket || isSpectator) return;
             deflectMode = false;
             socket.emit('takeCards');
         }
         
         function toggleDeflectMode() {
+            if (isSpectator) return;
             deflectMode = !deflectMode;
             const btn = document.getElementById('deflectBtn');
             if (deflectMode) {
@@ -1315,14 +1567,85 @@
         }
         
         function endAttack() {
-            if (!socket) return;
+            if (!socket || isSpectator) return;
             socket.emit('endAttack');
         }
         
         function finishThrowIn() {
-            if (!socket) return;
+            if (!socket || isSpectator) return;
             socket.emit('finishThrowIn');
             hideThrowInTimer();
+        }
+        
+        // Voting functions
+        function showVotingModal(data) {
+            const modal = document.getElementById('votingModal');
+            modal.classList.remove('hidden');
+            
+            let resultText = '';
+            if (data.durak) {
+                resultText = `${data.durak.name} is the Durak!`;
+                document.getElementById('votingTitle').textContent = `🃏 ${data.durak.name} is the Durak! 🃏`;
+            } else {
+                resultText = 'Game ended in a draw!';
+                document.getElementById('votingTitle').textContent = '🤝 Draw! 🤝';
+            }
+            
+            document.getElementById('votingResult').textContent = `Round ${data.roundNumber} complete.`;
+            
+            if (!isSpectator) {
+                document.getElementById('votingButtons').classList.remove('hidden');
+            } else {
+                document.getElementById('votingButtons').classList.add('hidden');
+            }
+            
+            // Start countdown
+            let timeLeft = 20;
+            voteCountdown = setInterval(() => {
+                timeLeft--;
+                document.getElementById('voteTimer').textContent = `Time remaining: ${timeLeft}s`;
+                if (timeLeft <= 0) {
+                    clearInterval(voteCountdown);
+                }
+            }, 1000);
+        }
+        
+        function hideVotingModal() {
+            document.getElementById('votingModal').classList.add('hidden');
+            document.getElementById('voteStatus').classList.add('hidden');
+            if (voteCountdown) {
+                clearInterval(voteCountdown);
+                voteCountdown = null;
+            }
+        }
+        
+        function votePlayAgain(vote) {
+            if (!socket || isSpectator) return;
+            
+            socket.emit('votePlayAgain', vote);
+            
+            // Disable buttons after voting
+            document.getElementById('votingButtons').classList.add('hidden');
+            document.getElementById('voteStatus').classList.remove('hidden');
+        }
+        
+        function updateVoteDisplay(data) {
+            const voteStatus = document.getElementById('voteStatus');
+            voteStatus.classList.remove('hidden');
+            
+            const voteList = document.getElementById('voteList');
+            const voteDiv = document.createElement('div');
+            voteDiv.className = 'vote-item';
+            voteDiv.innerHTML = `
+                <span>${data.playerName}</span>
+                <span class="${data.vote ? 'vote-yes' : 'vote-no'}">${data.vote ? '✓ Yes' : '✗ No'}</span>
+            `;
+            voteList.appendChild(voteDiv);
+            
+            const voteText = document.createElement('div');
+            voteText.style.marginTop = '10px';
+            voteText.textContent = `${data.totalVotes}/${data.totalPlayers} players voted`;
+            voteList.appendChild(voteText);
         }
         
         function showThrowInTimer(validRanks, maxThrowIn) {
