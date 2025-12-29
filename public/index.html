@@ -204,9 +204,18 @@
             font-size: 1em;
         }
 
+        .trump-card-wrapper {
+            width: 100px;
+            height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
         .card.trump-card {
             transform: rotate(90deg);
-            margin: 0 20px;
+            position: absolute;
         }
 
         .battlefield {
@@ -242,8 +251,10 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 20px;
+            gap: 30px;
             margin: 20px 0;
+            padding: 20px;
+            position: relative;
         }
 
         .deck {
@@ -553,6 +564,11 @@
                 width: 50px;
                 height: 70px;
             }
+            
+            .trump-card-wrapper {
+                width: 70px;
+                height: 50px;
+            }
 
             button {
                 padding: 10px 20px;
@@ -659,7 +675,9 @@
             <div class="deck" id="deckPile">
                 <span id="deckDisplay">36</span>
             </div>
-            <div id="trumpCard" class="card trump-card" style="display: none;"></div>
+            <div class="trump-card-wrapper" style="display: none;">
+                <div id="trumpCard" class="card trump-card"></div>
+            </div>
         </div>
 
         <div id="playerArea" class="player-area">
@@ -1096,16 +1114,18 @@
             document.getElementById('deckDisplay').textContent = gameState.deckCount;
             
             // Update trump card display
+            const trumpCardEl = document.getElementById('trumpCard');
+            const trumpWrapper = trumpCardEl.parentElement;
+            
             if (gameState.deckCount > 0 && gameState.trumpCard) {
-                const trumpCardEl = document.getElementById('trumpCard');
-                trumpCardEl.style.display = 'block';
+                trumpWrapper.style.display = 'flex';
                 trumpCardEl.innerHTML = `
                     <div>${gameState.trumpCard.rank}</div>
                     <div>${gameState.trumpCard.suit}</div>
                 `;
                 trumpCardEl.className = `card trump-card ${(gameState.trumpCard.suit === '♥' || gameState.trumpCard.suit === '♦') ? 'red' : 'black'}`;
             } else {
-                document.getElementById('trumpCard').style.display = 'none';
+                trumpWrapper.style.display = 'none';
             }
             
             // Update my cards - FIXED SORTING AND INDEXING
