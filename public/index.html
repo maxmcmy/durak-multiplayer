@@ -806,19 +806,27 @@
                 document.getElementById('trumpCard').style.display = 'none';
             }
             
-            // Update my cards
+            // Update my cards - FIXED SORTING AND INDEXING
             const playerCardsEl = document.getElementById('playerCards');
             playerCardsEl.innerHTML = '';
             
-            if (myHand) {
-                myHand.sort((a, b) => {
+            if (myHand && myHand.length > 0) {
+                // Create a sorted copy for display, but keep track of original indices
+                const cardsWithIndices = myHand.map((card, originalIndex) => ({
+                    ...card,
+                    originalIndex: originalIndex
+                }));
+                
+                cardsWithIndices.sort((a, b) => {
                     if (a.isTrump !== b.isTrump) return a.isTrump ? 1 : -1;
                     if (a.suit !== b.suit) return a.suit.localeCompare(b.suit);
                     return a.value - b.value;
-                }).forEach((card, index) => {
+                });
+                
+                cardsWithIndices.forEach((card, displayIndex) => {
                     const cardEl = document.createElement('div');
                     cardEl.className = `card ${(card.suit === '♥' || card.suit === '♦') ? 'red' : 'black'}`;
-                    if (selectedCard === index) {
+                    if (selectedCard === displayIndex) {
                         cardEl.classList.add('selected');
                     }
                     cardEl.innerHTML = `
@@ -826,7 +834,8 @@
                         <div>${card.suit}</div>
                         ${card.isTrump ? '<small>Trump</small>' : ''}
                     `;
-                    cardEl.onclick = () => selectCard(index);
+                    // Pass the original index, not the display index
+                    cardEl.onclick = () => selectCard(card.originalIndex, displayIndex);
                     playerCardsEl.appendChild(cardEl);
                 });
             }
@@ -877,18 +886,19 @@
             updateButtonStates();
         }
         
-        function selectCard(index) {
+        // FIXED selectCard function - now takes original index
+        function selectCard(originalIndex, displayIndex) {
             if (gameState.gameState !== 'playing') return;
             
-            selectedCard = index;
+            selectedCard = displayIndex;
             updateGameDisplay();
             
-            // Auto-play the card
+            // Auto-play the card using the original index
             if (gameState.currentAttacker === socket.id && gameState.gamePhase === 'attacking') {
-                socket.emit('playCard', { cardIndex: index });
+                socket.emit('playCard', { cardIndex: originalIndex });
                 selectedCard = null;
             } else if (gameState.currentDefender === socket.id && gameState.gamePhase === 'defending') {
-                socket.emit('playCard', { cardIndex: index });
+                socket.emit('playCard', { cardIndex: originalIndex });
                 selectedCard = null;
             }
         }
