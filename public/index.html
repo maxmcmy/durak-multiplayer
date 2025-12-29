@@ -354,14 +354,16 @@
         .player-slot {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 15px;
-            padding: 10px;
+            padding: 12px;
             box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
             transition: all 0.3s ease;
-            min-width: 180px;
-            max-width: 250px;
+            min-width: 200px;
+            max-width: 280px;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
         }
 
         .player-slot.position-circle {
@@ -399,24 +401,26 @@
         .player-slot.current-player {
             background: linear-gradient(135deg, #f0f0f0 0%, #ffffff 100%);
             border: 3px solid #007bff;
-            min-width: 240px;
-            padding: 12px;
+            min-width: 300px;
+            padding: 15px;
         }
 
         .player-name {
             font-weight: bold;
-            margin-bottom: 3px;
             text-align: center;
             font-size: 1em;
+            margin: 0;
         }
 
         .player-cards {
             display: flex;
             justify-content: center;
-            min-height: 75px;
+            align-items: center;
+            min-height: 85px;
             position: relative;
             overflow: visible;
-            padding: 5px 0;
+            padding: 5px 10px;
+            width: 100%;
         }
         
         /* Overlapping cards for better space usage */
@@ -424,9 +428,11 @@
             gap: 0;
         }
         
+        /* Less aggressive overlap for better visibility */
         .player-cards.hand-style .card {
-            margin-left: -30px;
+            margin-left: -20px;
             transition: all 0.3s ease;
+            position: relative;
         }
         
         .player-cards.hand-style .card:first-child {
@@ -434,39 +440,49 @@
         }
         
         .player-cards.hand-style .card:hover {
-            transform: translateY(-15px) !important;
-            z-index: 100;
+            transform: translateY(-20px) scale(1.1) !important;
+            z-index: 1000;
         }
         
-        /* Current player's hand spreads more for visibility */
+        /* Current player's hand has even less overlap for maximum visibility */
         .current-player .player-cards.hand-style .card {
-            margin-left: -25px;
+            margin-left: -15px;
         }
 
-        /* Larger cards for better visibility */
+        /* Larger cards for much better visibility */
         .card {
-            width: 50px;
-            height: 70px;
+            width: 60px;
+            height: 80px;
             background: white;
             border: 2px solid #333;
-            border-radius: 6px;
+            border-radius: 7px;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            font-size: 1.1em;
+            font-size: 1.3em;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.3s ease;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
             flex-shrink: 0;
         }
 
-        /* Current player's cards are larger */
+        /* Current player's cards are even larger */
         .current-player .card {
-            width: 55px;
-            height: 75px;
-            font-size: 1.2em;
+            width: 70px;
+            height: 95px;
+            font-size: 1.5em;
+        }
+
+        .card .rank {
+            font-size: 1.1em;
+            line-height: 1;
+        }
+
+        .card .suit {
+            font-size: 1.6em;
+            line-height: 1;
         }
 
         .card:hover {
@@ -1541,9 +1557,9 @@
             
             const infoDiv = document.createElement('div');
             infoDiv.style.textAlign = 'center';
-            infoDiv.style.fontSize = '0.9em';
+            infoDiv.style.fontSize = '0.85em';
             infoDiv.style.color = '#666';
-            infoDiv.style.marginTop = '5px';
+            infoDiv.style.margin = '2px 0 0 0';
             infoDiv.id = `info-${player.id}`;
             
             slot.appendChild(nameDiv);
@@ -1753,8 +1769,8 @@
             }
             
             cardEl.innerHTML = `
-                <div style="font-size: 0.9em">${card.rank}</div>
-                <div style="font-size: 1.3em">${card.suit}</div>
+                <div class="rank">${card.rank}</div>
+                <div class="suit">${card.suit}</div>
             `;
             
             cardEl.onclick = () => selectCard(index);
