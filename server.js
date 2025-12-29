@@ -985,9 +985,25 @@ function completeTakeCards(room) {
         }
     });
     
-    // Initial attacker continues
-    room.gamePhase = 'attacking';
+    // Move to next attacker (skip the defender who took cards)
+    const nextAttacker = getNextActivePlayer(room, room.currentDefenderId);
+    if (nextAttacker) {
+        room.initialAttackerId = nextAttacker.id;
+        const nextDefender = getNextActivePlayer(room, nextAttacker.id);
+        if (nextDefender) {
+            room.currentDefenderId = nextDefender.id;
+            room.additionalAttackers = getAttackers(room).filter(p => p.id !== room.initialAttackerId).map(p => p.id);
+            room.gamePhase = 'attacking';
+        }
+    } else {
+        // Fallback to original attacker if no next player found
+        room.gamePhase = 'attacking';
+    }
+    
     room.throwInDeadline = null;
+    
+    // Update player order
+    updatePlayerOrder(room);
     
     // Notify all players
     room.players.forEach(p => {
