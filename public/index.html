@@ -401,8 +401,9 @@
         .player-slot.current-player {
             background: linear-gradient(135deg, #f0f0f0 0%, #ffffff 100%);
             border: 3px solid #007bff;
-            min-width: 300px;
-            padding: 15px;
+            min-width: 380px;
+            max-width: 450px;
+            padding: 15px 20px;
         }
 
         .player-name {
@@ -419,7 +420,7 @@
             min-height: 85px;
             position: relative;
             overflow: visible;
-            padding: 5px 10px;
+            padding: 5px 15px;
             width: 100%;
         }
         
@@ -430,7 +431,7 @@
         
         /* Less aggressive overlap for better visibility */
         .player-cards.hand-style .card {
-            margin-left: -20px;
+            margin-left: -18px;
             transition: all 0.3s ease;
             position: relative;
         }
@@ -446,7 +447,7 @@
         
         /* Current player's hand has even less overlap for maximum visibility */
         .current-player .player-cards.hand-style .card {
-            margin-left: -15px;
+            margin-left: -10px;
         }
 
         /* Larger cards for much better visibility */
@@ -1573,22 +1574,22 @@
             const positions = [];
             
             if (numPlayers === 3) {
-                positions.push({ x: 50, y: isCurrentPlayerActive ? 90 : 80 });
+                positions.push({ x: 50, y: isCurrentPlayerActive ? 82 : 80 });
                 positions.push({ x: 15, y: 25 });
                 positions.push({ x: 85, y: 25 });
             } else if (numPlayers === 4) {
-                positions.push({ x: 50, y: isCurrentPlayerActive ? 90 : 85 });
+                positions.push({ x: 50, y: isCurrentPlayerActive ? 82 : 85 });
                 positions.push({ x: 10, y: 50 });
                 positions.push({ x: 50, y: 10 });
                 positions.push({ x: 90, y: 50 });
             } else if (numPlayers === 5) {
-                positions.push({ x: 50, y: isCurrentPlayerActive ? 90 : 85 });
+                positions.push({ x: 50, y: isCurrentPlayerActive ? 82 : 85 });
                 positions.push({ x: 10, y: 65 });
                 positions.push({ x: 15, y: 20 });
                 positions.push({ x: 85, y: 20 });
                 positions.push({ x: 90, y: 65 });
             } else if (numPlayers === 6) {
-                positions.push({ x: 50, y: isCurrentPlayerActive ? 90 : 85 });
+                positions.push({ x: 50, y: isCurrentPlayerActive ? 82 : 85 });
                 positions.push({ x: 10, y: 70 });
                 positions.push({ x: 10, y: 30 });
                 positions.push({ x: 50, y: 10 });
