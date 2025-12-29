@@ -73,6 +73,70 @@
             border-color: #667eea;
         }
 
+        .game-mode-selector {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .game-mode-options {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
+        .game-mode-option {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .game-mode-option:hover {
+            border-color: #667eea;
+            transform: scale(1.02);
+        }
+
+        .game-mode-option.selected {
+            border-color: #667eea;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+        }
+
+        .game-mode-option h4 {
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .game-mode-option p {
+            color: #666;
+            font-size: 0.9em;
+            margin: 5px 0;
+        }
+
+        .game-mode-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.9em;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .game-mode-badge.classic {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .game-mode-badge.ultimate {
+            background: #cfe2ff;
+            color: #084298;
+        }
+
         .room-code-display {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -645,6 +709,10 @@
             .battlefield-container {
                 width: 300px;
             }
+            
+            .game-mode-options {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -665,6 +733,22 @@
             <h2>Welcome, <span id="displayName"></span>!</h2>
             
             <div style="margin: 30px 0;">
+                <div class="game-mode-selector">
+                    <label style="font-weight: bold; color: #333;">Game Mode:</label>
+                    <div class="game-mode-options">
+                        <div class="game-mode-option selected" id="classicMode" onclick="selectGameMode('classic')">
+                            <h4>🎴 Classic Durak</h4>
+                            <p>36 cards (6-Ace)</p>
+                            <p>Traditional rules</p>
+                        </div>
+                        <div class="game-mode-option" id="ultimateMode" onclick="selectGameMode('ultimate')">
+                            <h4>🎯 Ultimate Durak</h4>
+                            <p>52 cards (2-Ace)</p>
+                            <p>Extended gameplay</p>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="input-group">
                     <label>Max Players (2-6):</label>
                     <input type="number" id="maxPlayers" min="2" max="6" value="4">
@@ -685,6 +769,7 @@
         <div id="waitingRoom" class="hidden">
             <h2>Room Code</h2>
             <div class="room-code-display" id="roomCodeDisplay">ABCD12</div>
+            <div id="gameModeDisplay" class="game-mode-badge">Classic Durak</div>
             <p class="waiting-message">Share this code with friends to start playing!</p>
             <p id="playerCount" style="color: #666;"></p>
             <p id="roundInfo" style="color: #666; font-weight: bold;"></p>
@@ -712,6 +797,7 @@
             
             <div class="top-info" style="margin-top: 45px;">
                 <div class="info-box">Round: <span id="roundNumber">1</span></div>
+                <div class="info-box">Mode: <span id="gameModeInfo">Classic</span></div>
                 <div class="info-box">Trump: <span id="trumpSuit">-</span></div>
                 <div class="info-box">Deck: <span id="deckCount">36</span></div>
                 <div class="info-box">Players: <span id="activePlayerCount">-</span></div>
@@ -803,7 +889,7 @@
         
         // Game state
         let playerInfo = { name: '', id: null };
-        let roomInfo = { code: null, players: [], maxPlayers: 4 };
+        let roomInfo = { code: null, players: [], maxPlayers: 4, gameMode: 'classic' };
         let gameState = null;
         let selectedCard = null;
         let myHand = [];
@@ -811,6 +897,7 @@
         let throwInInterval = null;
         let voteCountdown = null;
         let isSpectator = false;
+        let selectedGameMode = 'classic';
         
         // Connect to server
         function connectToServer() {
@@ -829,17 +916,21 @@
             socket.on('roomCreated', (data) => {
                 roomInfo.code = data.roomCode;
                 roomInfo.maxPlayers = data.gameState.maxPlayers;
+                roomInfo.gameMode = data.gameState.gameMode || 'classic';
                 gameState = data.gameState;
                 document.getElementById('roomCodeDisplay').textContent = data.roomCode;
                 showWaitingRoom();
                 updatePlayersList();
+                updateGameModeDisplay();
             });
             
             socket.on('roomJoined', (data) => {
                 gameState = data.gameState;
+                roomInfo.gameMode = data.gameState.gameMode || 'classic';
                 document.getElementById('roomCodeDisplay').textContent = roomInfo.code;
                 showWaitingRoom();
                 updatePlayersList();
+                updateGameModeDisplay();
                 
                 // Check if we're a spectator
                 const me = gameState.players.find(p => p.id === socket.id);
@@ -852,6 +943,7 @@
             socket.on('playerJoined', (data) => {
                 gameState = data.gameState;
                 updatePlayersList();
+                updateGameModeDisplay();
                 const msg = data.isSpectator 
                     ? `${data.playerName} joined as spectator!` 
                     : `${data.playerName} joined the room!`;
@@ -875,6 +967,7 @@
             
             socket.on('gameStarted', (data) => {
                 gameState = data.gameState;
+                roomInfo.gameMode = data.gameState.gameMode || 'classic';
                 startGame();
             });
             
@@ -948,6 +1041,7 @@
                     document.getElementById('lobbyScreen').classList.remove('hidden');
                     showWaitingRoom();
                     updatePlayersList();
+                    updateGameModeDisplay();
                 }, 2000);
             });
             
@@ -970,6 +1064,32 @@
             socket.on('playerDisconnected', (data) => {
                 showMessage(`${data.playerName} disconnected`, 'error');
             });
+        }
+        
+        // Select game mode
+        function selectGameMode(mode) {
+            selectedGameMode = mode;
+            document.getElementById('classicMode').classList.toggle('selected', mode === 'classic');
+            document.getElementById('ultimateMode').classList.toggle('selected', mode === 'ultimate');
+        }
+        
+        // Update game mode display
+        function updateGameModeDisplay() {
+            if (!gameState) return;
+            
+            const mode = gameState.gameMode || 'classic';
+            const modeDisplay = mode === 'ultimate' ? 'Ultimate Durak' : 'Classic Durak';
+            const gameModeElement = document.getElementById('gameModeDisplay');
+            
+            if (gameModeElement) {
+                gameModeElement.textContent = modeDisplay;
+                gameModeElement.className = `game-mode-badge ${mode}`;
+            }
+            
+            const gameModeInfo = document.getElementById('gameModeInfo');
+            if (gameModeInfo) {
+                gameModeInfo.textContent = mode === 'ultimate' ? 'Ultimate' : 'Classic';
+            }
         }
         
         // Copy room code to clipboard
@@ -1004,7 +1124,8 @@
             const maxPlayers = parseInt(document.getElementById('maxPlayers').value);
             socket.emit('createRoom', {
                 playerName: playerInfo.name,
-                maxPlayers: maxPlayers
+                maxPlayers: maxPlayers,
+                gameMode: selectedGameMode
             });
         }
         
@@ -1139,6 +1260,7 @@
             
             createPlayerSlots();
             updateGameDisplay();
+            updateGameModeDisplay();
             
             const me = gameState.players.find(p => p.id === socket.id);
             isSpectator = me && me.isSpectator;
@@ -1146,7 +1268,8 @@
             if (isSpectator) {
                 showMessage('You are spectating this round. Wait for the next game!', 'info');
             } else {
-                showMessage('Game started! Good luck!', 'success');
+                const modeText = gameState.gameMode === 'ultimate' ? 'Ultimate Durak' : 'Classic Durak';
+                showMessage(`${modeText} started! Good luck!`, 'success');
             }
         }
         
