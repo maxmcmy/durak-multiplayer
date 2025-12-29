@@ -229,9 +229,15 @@ function startGame(roomCode) {
     room.trumpCard = room.deck[0];
     room.trumpSuit = room.trumpCard.suit;
     
-    // Mark trump cards
-    [...room.deck, ...activePlayers.flatMap(p => p.hand)].forEach(card => {
+    // Mark trump cards - ensure all cards everywhere get marked
+    room.deck.forEach(card => {
         card.isTrump = card.suit === room.trumpSuit;
+    });
+    
+    activePlayers.forEach(player => {
+        player.hand.forEach(card => {
+            card.isTrump = card.suit === room.trumpSuit;
+        });
     });
     
     // Determine first attacker (player with lowest trump)
@@ -260,6 +266,7 @@ function startGame(roomCode) {
     updatePlayerOrder(room);
     
     console.log(`Game started in room ${roomCode} (${room.gameMode} mode) with ${activePlayers.length} players`);
+    console.log(`Trump suit: ${room.trumpSuit}`);
     return true;
 }
 
@@ -578,6 +585,9 @@ io.on('connection', (socket) => {
         
         const card = player.hand[cardIndex];
         
+        // Ensure trump status is correct
+        card.isTrump = card.suit === room.trumpSuit;
+        
         // Handle attack (initial attacker or additional attackers can attack at ANY time)
         if ((room.initialAttackerId === socket.id || room.additionalAttackers.includes(socket.id)) 
             && (room.gamePhase === 'attacking' || room.gamePhase === 'defending')) {
@@ -692,6 +702,13 @@ io.on('connection', (socket) => {
         const card = player.hand[cardIndex];
         const targetAttack = room.battlefield[targetIndex].attack;
         
+        // Re-ensure trump status is correctly set (defensive fix)
+        card.isTrump = card.suit === room.trumpSuit;
+        targetAttack.isTrump = targetAttack.suit === room.trumpSuit;
+        
+        // Debug logging
+        console.log(`Defense attempt: ${card.rank}${card.suit} (trump:${card.isTrump}) vs ${targetAttack.rank}${targetAttack.suit} (trump:${targetAttack.isTrump}), Trump suit: ${room.trumpSuit}`);
+        
         // Check if card can defend
         if (canDefend(card, targetAttack)) {
             room.battlefield[targetIndex].defense = card;
@@ -716,6 +733,7 @@ io.on('connection', (socket) => {
             
             checkForWinner(room, player);
         } else {
+            console.log(`Defense failed: Cannot defend ${targetAttack.rank}${targetAttack.suit} with ${card.rank}${card.suit}`);
             socket.emit('error', { message: 'This card cannot defend against that attack' });
         }
     });
@@ -746,6 +764,9 @@ io.on('connection', (socket) => {
         
         if (cardIndex >= defender.hand.length) return;
         const deflectCard = defender.hand[cardIndex];
+        
+        // Ensure trump status
+        deflectCard.isTrump = deflectCard.suit === room.trumpSuit;
         
         // Check if deflect card has same rank as any undefended attack
         let canDeflect = false;
@@ -919,6 +940,18 @@ io.on('connection', (socket) => {
 // Helper function to complete taking cards after throw-in
 function completeTakeCards(room) {
     const defender = room.players.find(p => p.id === room.currentDefenderId);
+    
+    // Ensure all cards have correct trump status before adding to defender's hand
+    room.battlefield.forEach(pair => {
+        pair.attack.isTrump = pair.attack.suit === room.trumpSuit;
+        if (pair.defense) {
+            pair.defense.isTrump = pair.defense.suit === room.trumpSuit;
+        }
+    });
+    
+    room.throwInCards.forEach(item => {
+        item.card.isTrump = item.card.suit === room.trumpSuit;
+    });
     
     // Defender takes all cards from battlefield and throw-in pile
     room.battlefield.forEach(pair => {
