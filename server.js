@@ -1,4 +1,4 @@
-// server.js - Durak Multiplayer Server (2-6 Players) - FIXED
+// server.js - Durak Multiplayer Server with Spectator Mode and Play Again
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -25,6 +25,7 @@ const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 6;
 const INITIAL_HAND_SIZE = 6;
 const MAX_BATTLEFIELD_SIZE = 6;
+const VOTE_TIMEOUT = 20000; // 20 seconds to vote
 
 // Card representations
 const suits = ['♠', '♥', '♦', '♣'];
@@ -74,6 +75,9 @@ function cleanupRoom(roomCode) {
         if (room.turnTimer) {
             clearTimeout(room.turnTimer);
         }
+        if (room.voteTimer) {
+            clearTimeout(room.voteTimer);
+        }
         
         // Remove all player mappings
         room.players.forEach(p => {
@@ -106,9 +110,11 @@ function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4) {
             connected: true,
             position: 0,
             isActive: true,
-            hasWon: false
+            hasWon: false,
+            isSpectator: false,
+            votedPlayAgain: false
         }],
-        gameState: 'waiting',
+        gameState: 'waiting', // waiting, playing, voting, finished
         deck: [],
         battlefield: [],
         trumpCard: null,
@@ -116,7 +122,7 @@ function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4) {
         initialAttackerId: null,
         currentDefenderId: null,
         additionalAttackers: [],
-        gamePhase: 'waiting',
+        gamePhase: 'waiting', // waiting, attacking, defending, throwIn
         throwInTimer: null,
         throwInDeadline: null,
         validThrowInRanks: new Set(),
@@ -126,7 +132,12 @@ function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4) {
         lastAction: Date.now(),
         winners: [],
         playerOrder: [],
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        roundNumber: 1,
+        // Voting system
+        playAgainVotes: new Map(),
+        voteTimer: null,
+        voteDeadline: null
     };
     
     gameRooms.set(roomCode, room);
@@ -144,7 +155,7 @@ function getNextActivePlayer(room, afterPlayerId) {
     
     while (attempts < room.players.length) {
         const nextPlayer = room.players.find(p => p.position === nextPosition);
-        if (nextPlayer && nextPlayer.isActive && !nextPlayer.hasWon) {
+        if (nextPlayer && nextPlayer.isActive && !nextPlayer.hasWon && !nextPlayer.isSpectator) {
             return nextPlayer;
         }
         nextPosition = (nextPosition + 1) % room.players.length;
@@ -160,6 +171,7 @@ function getAttackers(room) {
     return room.players.filter(p => 
         p.isActive && 
         !p.hasWon && 
+        !p.isSpectator &&
         p.id !== room.currentDefenderId &&
         p.hand.length > 0
     );
@@ -168,7 +180,11 @@ function getAttackers(room) {
 // Start a game in a room
 function startGame(roomCode) {
     const room = gameRooms.get(roomCode);
-    if (!room || room.players.length < MIN_PLAYERS) return false;
+    if (!room) return false;
+    
+    // Count non-spectator players
+    const activePlayers = room.players.filter(p => !p.isSpectator);
+    if (activePlayers.length < MIN_PLAYERS) return false;
     
     // Initialize game
     room.deck = createDeck();
@@ -177,18 +193,20 @@ function startGame(roomCode) {
     room.gameState = 'playing';
     room.gamePhase = 'attacking';
     room.winners = [];
+    room.playAgainVotes.clear();
     
-    // Set player positions (clockwise order)
-    room.players.forEach((player, index) => {
+    // Set player positions (clockwise order) - only for non-spectators
+    activePlayers.forEach((player, index) => {
         player.position = index;
         player.hand = [];
         player.isActive = true;
         player.hasWon = false;
+        player.votedPlayAgain = false;
     });
     
-    // Deal initial cards
+    // Deal initial cards to active players only
     for (let i = 0; i < INITIAL_HAND_SIZE; i++) {
-        room.players.forEach(player => {
+        activePlayers.forEach(player => {
             if (room.deck.length > 0) {
                 player.hand.push(room.deck.pop());
             }
@@ -200,7 +218,7 @@ function startGame(roomCode) {
     room.trumpSuit = room.trumpCard.suit;
     
     // Mark trump cards
-    [...room.deck, ...room.players.flatMap(p => p.hand)].forEach(card => {
+    [...room.deck, ...activePlayers.flatMap(p => p.hand)].forEach(card => {
         card.isTrump = card.suit === room.trumpSuit;
     });
     
@@ -208,7 +226,7 @@ function startGame(roomCode) {
     let lowestTrump = null;
     let firstAttacker = null;
     
-    room.players.forEach(player => {
+    activePlayers.forEach(player => {
         player.hand.forEach(card => {
             if (card.isTrump && (!lowestTrump || card.value < lowestTrump.value)) {
                 lowestTrump = card;
@@ -219,7 +237,7 @@ function startGame(roomCode) {
     
     // If no one has trump, random start
     if (!firstAttacker) {
-        firstAttacker = room.players[Math.floor(Math.random() * room.players.length)];
+        firstAttacker = activePlayers[Math.floor(Math.random() * activePlayers.length)];
     }
     
     // Set initial attacker and defender
@@ -232,10 +250,53 @@ function startGame(roomCode) {
     return true;
 }
 
+// Reset room for new game with same players
+function resetRoomForNewGame(room) {
+    // Keep players who voted yes, remove those who didn't
+    const stayingPlayers = room.players.filter(p => p.votedPlayAgain);
+    
+    // Reset player states
+    stayingPlayers.forEach((player, index) => {
+        player.ready = false;
+        player.hand = [];
+        player.position = index;
+        player.isActive = true;
+        player.hasWon = false;
+        player.isSpectator = false;
+        player.votedPlayAgain = false;
+    });
+    
+    room.players = stayingPlayers;
+    room.gameState = 'waiting';
+    room.gamePhase = 'waiting';
+    room.deck = [];
+    room.battlefield = [];
+    room.trumpCard = null;
+    room.trumpSuit = '';
+    room.initialAttackerId = null;
+    room.currentDefenderId = null;
+    room.additionalAttackers = [];
+    room.throwInCards = [];
+    room.winners = [];
+    room.playerOrder = [];
+    room.playAgainVotes.clear();
+    room.roundNumber++;
+    
+    // Clear timers
+    if (room.throwInTimer) {
+        clearTimeout(room.throwInTimer);
+        room.throwInTimer = null;
+    }
+    if (room.voteTimer) {
+        clearTimeout(room.voteTimer);
+        room.voteTimer = null;
+    }
+}
+
 // Update the order of active players
 function updatePlayerOrder(room) {
     room.playerOrder = room.players
-        .filter(p => p.isActive && !p.hasWon)
+        .filter(p => p.isActive && !p.hasWon && !p.isSpectator)
         .sort((a, b) => a.position - b.position)
         .map(p => p.id);
 }
@@ -260,6 +321,9 @@ function getSafeGameState(room, playerId) {
         validThrowInRanks: Array.from(room.validThrowInRanks),
         winners: room.winners,
         playerOrder: room.playerOrder,
+        roundNumber: room.roundNumber,
+        voteDeadline: room.voteDeadline,
+        playAgainVotes: Array.from(room.playAgainVotes.entries()),
         players: room.players.map(p => ({
             id: p.id,
             name: p.name,
@@ -270,6 +334,8 @@ function getSafeGameState(room, playerId) {
             connected: p.connected,
             isActive: p.isActive,
             hasWon: p.hasWon,
+            isSpectator: p.isSpectator,
+            votedPlayAgain: p.votedPlayAgain,
             isInitialAttacker: p.id === room.initialAttackerId,
             isDefender: p.id === room.currentDefenderId,
             canAttack: room.additionalAttackers.includes(p.id) || p.id === room.initialAttackerId
@@ -343,15 +409,9 @@ io.on('connection', (socket) => {
             handlePlayerLeave(socket.id, existingRoomCode);
         }
         
-        if (room.players.length >= room.maxPlayers) {
-            socket.emit('error', { message: 'Room is full' });
-            return;
-        }
-        
-        if (room.gameState !== 'waiting') {
-            socket.emit('error', { message: 'Game already in progress' });
-            return;
-        }
+        // Check if room is full (but allow spectators)
+        const activePlayers = room.players.filter(p => !p.isSpectator);
+        const isSpectator = room.gameState === 'playing' || activePlayers.length >= room.maxPlayers;
         
         // Add player to room
         room.players.push({
@@ -361,8 +421,10 @@ io.on('connection', (socket) => {
             hand: [],
             connected: true,
             position: room.players.length,
-            isActive: true,
-            hasWon: false
+            isActive: !isSpectator,
+            hasWon: false,
+            isSpectator: isSpectator,
+            votedPlayAgain: false
         });
         
         playerRooms.set(socket.id, roomCode);
@@ -370,10 +432,13 @@ io.on('connection', (socket) => {
         
         // Notify all players in room
         io.to(roomCode).emit('playerJoined', {
-            gameState: getSafeGameState(room, socket.id)
+            gameState: getSafeGameState(room, socket.id),
+            playerName: playerName,
+            isSpectator: isSpectator
         });
         
-        console.log(`${playerName} joined room ${roomCode} (${room.players.length}/${room.maxPlayers})`);
+        const status = isSpectator ? 'spectating' : 'playing';
+        console.log(`${playerName} joined room ${roomCode} as ${status}`);
     });
     
     // Handle player leaving
@@ -386,8 +451,8 @@ io.on('connection', (socket) => {
         
         const player = room.players[playerIndex];
         
-        // If game hasn't started, remove player completely
-        if (room.gameState === 'waiting') {
+        // If game hasn't started or in voting, remove player completely
+        if (room.gameState === 'waiting' || room.gameState === 'voting') {
             room.players.splice(playerIndex, 1);
             playerRooms.delete(playerId);
             
@@ -395,6 +460,11 @@ io.on('connection', (socket) => {
             room.players.forEach((p, i) => {
                 p.position = i;
             });
+            
+            // Clear vote if they had voted
+            if (room.playAgainVotes.has(playerId)) {
+                room.playAgainVotes.delete(playerId);
+            }
             
             // Notify other players
             io.to(roomCode).emit('playerLeft', {
@@ -426,11 +496,12 @@ io.on('connection', (socket) => {
         if (!room) return;
         
         const player = room.players.find(p => p.id === socket.id);
-        if (player) {
+        if (player && !player.isSpectator) {
             player.ready = true;
             
-            // Check if all players are ready (minimum 2 players)
-            if (room.players.length >= MIN_PLAYERS && room.players.every(p => p.ready)) {
+            // Check if all non-spectator players are ready (minimum 2 players)
+            const activePlayers = room.players.filter(p => !p.isSpectator);
+            if (activePlayers.length >= MIN_PLAYERS && activePlayers.every(p => p.ready)) {
                 if (startGame(roomCode)) {
                     // Send game state to each player with their own cards visible
                     room.players.forEach(p => {
@@ -439,7 +510,7 @@ io.on('connection', (socket) => {
                         });
                     });
                     
-                    console.log(`Game started in room ${roomCode} with ${room.players.length} players`);
+                    console.log(`Game started in room ${roomCode} with ${activePlayers.length} players`);
                 }
             } else {
                 io.to(roomCode).emit('playerReadyUpdate', {
@@ -447,6 +518,35 @@ io.on('connection', (socket) => {
                     ready: true
                 });
             }
+        }
+    });
+    
+    // Vote to play again
+    socket.on('votePlayAgain', (vote) => {
+        const roomCode = playerRooms.get(socket.id);
+        const room = gameRooms.get(roomCode);
+        
+        if (!room || room.gameState !== 'voting') return;
+        
+        const player = room.players.find(p => p.id === socket.id);
+        if (!player) return;
+        
+        player.votedPlayAgain = vote;
+        room.playAgainVotes.set(socket.id, vote);
+        
+        // Notify others of the vote
+        io.to(roomCode).emit('playerVoted', {
+            playerId: socket.id,
+            playerName: player.name,
+            vote: vote,
+            totalVotes: room.playAgainVotes.size,
+            totalPlayers: room.players.filter(p => !p.isSpectator).length
+        });
+        
+        // Check if all players have voted
+        const eligiblePlayers = room.players.filter(p => !p.isSpectator);
+        if (room.playAgainVotes.size === eligiblePlayers.length) {
+            completeVoting(room);
         }
     });
     
@@ -459,7 +559,7 @@ io.on('connection', (socket) => {
         if (!room || room.gameState !== 'playing') return;
         
         const player = room.players.find(p => p.id === socket.id);
-        if (!player || cardIndex >= player.hand.length) return;
+        if (!player || player.isSpectator || cardIndex >= player.hand.length) return;
         
         const card = player.hand[cardIndex];
         
@@ -810,7 +910,8 @@ function completeTakeCards(room) {
     
     // Draw for other attackers
     room.players.forEach(player => {
-        if (player.id !== room.initialAttackerId && player.id !== room.currentDefenderId && player.isActive && !player.hasWon) {
+        if (player.id !== room.initialAttackerId && player.id !== room.currentDefenderId && 
+            player.isActive && !player.hasWon && !player.isSpectator) {
             drawCardsForPlayer(room, player);
         }
     });
@@ -847,7 +948,7 @@ function completeSuccessfulDefense(room) {
     
     // Draw for other players in clockwise order
     room.players.forEach(player => {
-        if (player.id !== room.initialAttackerId && player.isActive && !player.hasWon) {
+        if (player.id !== room.initialAttackerId && player.isActive && !player.hasWon && !player.isSpectator) {
             drawCardsForPlayer(room, player);
         }
     });
@@ -934,39 +1035,77 @@ function canDefend(defenseCard, attackCard) {
     return false;
 }
 
+// Complete voting phase
+function completeVoting(room) {
+    // Clear vote timer if it exists
+    if (room.voteTimer) {
+        clearTimeout(room.voteTimer);
+        room.voteTimer = null;
+    }
+    
+    // Count yes votes
+    const yesVotes = Array.from(room.playAgainVotes.values()).filter(v => v).length;
+    const totalPlayers = room.players.filter(p => !p.isSpectator).length;
+    
+    if (yesVotes >= MIN_PLAYERS) {
+        // Reset for new game
+        resetRoomForNewGame(room);
+        
+        io.to(room.code).emit('newGameStarting', {
+            gameState: getSafeGameState(room, null),
+            yesVotes: yesVotes,
+            totalVotes: totalPlayers
+        });
+    } else {
+        // Not enough votes, room stays in finished state
+        room.gameState = 'finished';
+        
+        io.to(room.code).emit('votingComplete', {
+            result: 'ended',
+            yesVotes: yesVotes,
+            totalVotes: totalPlayers
+        });
+        
+        // Clean up room after 10 seconds
+        setTimeout(() => {
+            cleanupRoom(room.code);
+        }, 10000);
+    }
+}
+
 // Check for game end
 function checkGameEnd(room) {
-    const activePlayers = room.players.filter(p => p.isActive && !p.hasWon);
+    const activePlayers = room.players.filter(p => p.isActive && !p.hasWon && !p.isSpectator);
     
     if (room.deck.length === 0) {
         // Check if only one player has cards left
         const playersWithCards = activePlayers.filter(p => p.hand.length > 0);
         
         if (playersWithCards.length <= 1) {
-            room.gameState = 'finished';
+            room.gameState = 'voting';
+            room.gamePhase = 'voting';
+            room.voteDeadline = Date.now() + VOTE_TIMEOUT;
             
             // Last player with cards is the Durak (loser)
+            let durak = null;
             if (playersWithCards.length === 1) {
-                const durak = playersWithCards[0];
-                
-                io.to(room.code).emit('gameOver', {
-                    durak: {
-                        id: durak.id,
-                        name: durak.name
-                    },
-                    winners: room.winners
-                });
-            } else {
-                // Everyone ran out of cards at the same time (very rare)
-                io.to(room.code).emit('gameDraw', {
-                    winners: room.winners
-                });
+                durak = playersWithCards[0];
             }
             
-            // Clean up room after 10 seconds
-            setTimeout(() => {
-                cleanupRoom(room.code);
-            }, 10000);
+            io.to(room.code).emit('gameOver', {
+                durak: durak ? {
+                    id: durak.id,
+                    name: durak.name
+                } : null,
+                winners: room.winners,
+                roundNumber: room.roundNumber
+            });
+            
+            // Start vote timer
+            room.voteTimer = setTimeout(() => {
+                // Auto-complete voting if time runs out
+                completeVoting(room);
+            }, VOTE_TIMEOUT);
         }
     }
 }
