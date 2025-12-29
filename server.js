@@ -1,4 +1,4 @@
-// server.js - Durak Multiplayer Server (2-6 Players)
+// server.js - Durak Multiplayer Server (2-6 Players) - FIXED
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -57,8 +57,44 @@ function shuffleDeck(deck) {
     return newDeck;
 }
 
+// Clean up empty or broken rooms
+function cleanupRoom(roomCode) {
+    const room = gameRooms.get(roomCode);
+    if (!room) return;
+    
+    // Check if room should be deleted
+    const shouldDelete = room.players.length === 0 || 
+                         room.players.every(p => !p.connected);
+    
+    if (shouldDelete) {
+        // Clear any timers
+        if (room.throwInTimer) {
+            clearTimeout(room.throwInTimer);
+        }
+        if (room.turnTimer) {
+            clearTimeout(room.turnTimer);
+        }
+        
+        // Remove all player mappings
+        room.players.forEach(p => {
+            playerRooms.delete(p.id);
+        });
+        
+        // Delete the room
+        gameRooms.delete(roomCode);
+        console.log(`Room ${roomCode} cleaned up`);
+        return true;
+    }
+    return false;
+}
+
 // Create a new game room
 function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4) {
+    // Clean up any existing room with same code first
+    if (gameRooms.has(roomCode)) {
+        cleanupRoom(roomCode);
+    }
+    
     const room = {
         code: roomCode,
         maxPlayers: Math.min(Math.max(maxPlayers, MIN_PLAYERS), MAX_PLAYERS),
@@ -69,18 +105,18 @@ function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4) {
             hand: [],
             connected: true,
             position: 0,
-            isActive: true, // Still in game (has cards or just won)
+            isActive: true,
             hasWon: false
         }],
-        gameState: 'waiting', // waiting, playing, finished
+        gameState: 'waiting',
         deck: [],
         battlefield: [],
         trumpCard: null,
         trumpSuit: '',
-        initialAttackerId: null, // Player who started the current attack
-        currentDefenderId: null, // Player who is defending
-        additionalAttackers: [], // Other players who can add cards
-        gamePhase: 'waiting', // waiting, attacking, defending, throwIn
+        initialAttackerId: null,
+        currentDefenderId: null,
+        additionalAttackers: [],
+        gamePhase: 'waiting',
         throwInTimer: null,
         throwInDeadline: null,
         validThrowInRanks: new Set(),
@@ -88,8 +124,9 @@ function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4) {
         maxThrowInTotal: 6,
         turnTimer: null,
         lastAction: Date.now(),
-        winners: [], // Players who have run out of cards
-        playerOrder: [] // Clockwise order of active players
+        winners: [],
+        playerOrder: [],
+        createdAt: Date.now()
     };
     
     gameRooms.set(roomCode, room);
@@ -248,6 +285,17 @@ io.on('connection', (socket) => {
     // Create a new room
     socket.on('createRoom', (data) => {
         const { playerName, maxPlayers } = data;
+        
+        // Check if player is already in a room
+        const existingRoomCode = playerRooms.get(socket.id);
+        if (existingRoomCode) {
+            const existingRoom = gameRooms.get(existingRoomCode);
+            if (existingRoom) {
+                // Leave existing room first
+                handlePlayerLeave(socket.id, existingRoomCode);
+            }
+        }
+        
         const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         
         const room = createRoom(roomCode, socket.id, playerName, maxPlayers || 4);
@@ -269,6 +317,30 @@ io.on('connection', (socket) => {
         if (!room) {
             socket.emit('error', { message: 'Room not found' });
             return;
+        }
+        
+        // Check if player is already in this room (might be reconnecting)
+        const existingPlayer = room.players.find(p => p.id === socket.id);
+        if (existingPlayer) {
+            // Reconnection - just update connection status
+            existingPlayer.connected = true;
+            socket.join(roomCode);
+            
+            socket.emit('roomJoined', {
+                gameState: getSafeGameState(room, socket.id)
+            });
+            
+            io.to(roomCode).emit('playerReconnected', {
+                playerId: socket.id,
+                playerName: existingPlayer.name
+            });
+            return;
+        }
+        
+        // Check if player is in another room
+        const existingRoomCode = playerRooms.get(socket.id);
+        if (existingRoomCode && existingRoomCode !== roomCode) {
+            handlePlayerLeave(socket.id, existingRoomCode);
         }
         
         if (room.players.length >= room.maxPlayers) {
@@ -303,6 +375,48 @@ io.on('connection', (socket) => {
         
         console.log(`${playerName} joined room ${roomCode} (${room.players.length}/${room.maxPlayers})`);
     });
+    
+    // Handle player leaving
+    function handlePlayerLeave(playerId, roomCode) {
+        const room = gameRooms.get(roomCode);
+        if (!room) return;
+        
+        const playerIndex = room.players.findIndex(p => p.id === playerId);
+        if (playerIndex === -1) return;
+        
+        const player = room.players[playerIndex];
+        
+        // If game hasn't started, remove player completely
+        if (room.gameState === 'waiting') {
+            room.players.splice(playerIndex, 1);
+            playerRooms.delete(playerId);
+            
+            // Update positions
+            room.players.forEach((p, i) => {
+                p.position = i;
+            });
+            
+            // Notify other players
+            io.to(roomCode).emit('playerLeft', {
+                playerId: playerId,
+                playerName: player.name,
+                gameState: getSafeGameState(room, playerId)
+            });
+            
+            // Clean up empty room
+            if (room.players.length === 0) {
+                cleanupRoom(roomCode);
+            }
+        } else {
+            // Game in progress - just mark as disconnected
+            player.connected = false;
+            
+            io.to(roomCode).emit('playerDisconnected', {
+                playerId: playerId,
+                playerName: player.name
+            });
+        }
+    }
     
     // Player ready
     socket.on('playerReady', () => {
@@ -658,31 +772,7 @@ io.on('connection', (socket) => {
         const room = gameRooms.get(roomCode);
         
         if (room) {
-            const player = room.players.find(p => p.id === socket.id);
-            if (player) {
-                player.connected = false;
-                
-                // Clear any active timers
-                if (room.throwInTimer) {
-                    clearTimeout(room.throwInTimer);
-                    room.throwInTimer = null;
-                }
-                
-                // Notify other players
-                io.to(roomCode).emit('playerDisconnected', {
-                    playerId: socket.id,
-                    playerName: player.name
-                });
-                
-                // Clean up room if empty
-                setTimeout(() => {
-                    const room = gameRooms.get(roomCode);
-                    if (room && room.players.every(p => !p.connected)) {
-                        gameRooms.delete(roomCode);
-                        console.log(`Room ${roomCode} deleted (all players disconnected)`);
-                    }
-                }, 30000);
-            }
+            handlePlayerLeave(socket.id, roomCode);
         }
         
         playerRooms.delete(socket.id);
@@ -705,22 +795,14 @@ function completeTakeCards(room) {
         defender.hand.push(item.card);
     });
     
-    const totalCardsTaken = room.battlefield.length * (room.battlefield.some(p => p.defense) ? 2 : 1) + room.throwInCards.length;
+    const totalCardsTaken = room.battlefield.reduce((sum, pair) => 
+        sum + 1 + (pair.defense ? 1 : 0), 0) + room.throwInCards.length;
     
     room.battlefield = [];
     room.throwInCards = [];
     room.validThrowInRanks.clear();
     
     // Draw cards for all players who attacked
-    const attackers = new Set();
-    room.battlefield.forEach(pair => {
-        if (pair.attackerId) attackers.add(pair.attackerId);
-    });
-    room.throwInCards.forEach(item => {
-        if (item.playerId) attackers.add(item.playerId);
-    });
-    
-    // Draw cards in clockwise order starting with initial attacker
     const initialAttacker = room.players.find(p => p.id === room.initialAttackerId);
     if (initialAttacker) {
         drawCardsForPlayer(room, initialAttacker);
@@ -728,7 +810,7 @@ function completeTakeCards(room) {
     
     // Draw for other attackers
     room.players.forEach(player => {
-        if (player.id !== room.initialAttackerId && player.id !== room.currentDefenderId) {
+        if (player.id !== room.initialAttackerId && player.id !== room.currentDefenderId && player.isActive && !player.hasWon) {
             drawCardsForPlayer(room, player);
         }
     });
@@ -880,9 +962,33 @@ function checkGameEnd(room) {
                     winners: room.winners
                 });
             }
+            
+            // Clean up room after 10 seconds
+            setTimeout(() => {
+                cleanupRoom(room.code);
+            }, 10000);
         }
     }
 }
+
+// Periodic cleanup of old/broken rooms
+setInterval(() => {
+    const now = Date.now();
+    const maxAge = 30 * 60 * 1000; // 30 minutes
+    
+    gameRooms.forEach((room, code) => {
+        // Clean up old waiting rooms
+        if (room.gameState === 'waiting' && (now - room.createdAt) > maxAge) {
+            console.log(`Cleaning up old waiting room ${code}`);
+            cleanupRoom(code);
+        }
+        // Clean up rooms where all players disconnected
+        else if (room.players.every(p => !p.connected)) {
+            console.log(`Cleaning up abandoned room ${code}`);
+            cleanupRoom(code);
+        }
+    });
+}, 60000); // Run every minute
 
 // Start server
 const PORT = process.env.PORT || 3000;
