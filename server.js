@@ -1,4 +1,4 @@
-// server.js - Durak Multiplayer Server with Spectator Mode and Play Again
+// server.js - Durak Multiplayer Server with Game Modes (Classic & Ultimate)
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -27,14 +27,23 @@ const INITIAL_HAND_SIZE = 6;
 const MAX_BATTLEFIELD_SIZE = 6;
 const VOTE_TIMEOUT = 20000; // 20 seconds to vote
 
-// Card representations
+// Card representations - Updated for both modes
 const suits = ['♠', '♥', '♦', '♣'];
-const ranks = ['6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-const rankValues = {'6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14};
 
-// Create a new deck
-function createDeck() {
+// Classic mode: 36 cards (6-Ace)
+const classicRanks = ['6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+const classicRankValues = {'6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14};
+
+// Ultimate mode: 52 cards (2-Ace)
+const ultimateRanks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+const ultimateRankValues = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14};
+
+// Create a new deck based on game mode
+function createDeck(gameMode = 'classic') {
     const deck = [];
+    const ranks = gameMode === 'ultimate' ? ultimateRanks : classicRanks;
+    const rankValues = gameMode === 'ultimate' ? ultimateRankValues : classicRankValues;
+    
     for (let suit of suits) {
         for (let rank of ranks) {
             deck.push({
@@ -92,8 +101,8 @@ function cleanupRoom(roomCode) {
     return false;
 }
 
-// Create a new game room
-function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4) {
+// Create a new game room - Updated to include game mode
+function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4, gameMode = 'classic') {
     // Clean up any existing room with same code first
     if (gameRooms.has(roomCode)) {
         cleanupRoom(roomCode);
@@ -102,6 +111,7 @@ function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4) {
     const room = {
         code: roomCode,
         maxPlayers: Math.min(Math.max(maxPlayers, MIN_PLAYERS), MAX_PLAYERS),
+        gameMode: gameMode, // 'classic' or 'ultimate'
         players: [{
             id: creatorId,
             name: creatorName,
@@ -142,6 +152,8 @@ function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4) {
     
     gameRooms.set(roomCode, room);
     playerRooms.set(creatorId, roomCode);
+    
+    console.log(`Room ${roomCode} created in ${gameMode} mode with max ${maxPlayers} players`);
     return room;
 }
 
@@ -177,7 +189,7 @@ function getAttackers(room) {
     );
 }
 
-// Start a game in a room
+// Start a game in a room - Updated to use game mode
 function startGame(roomCode) {
     const room = gameRooms.get(roomCode);
     if (!room) return false;
@@ -186,8 +198,8 @@ function startGame(roomCode) {
     const activePlayers = room.players.filter(p => !p.isSpectator);
     if (activePlayers.length < MIN_PLAYERS) return false;
     
-    // Initialize game
-    room.deck = createDeck();
+    // Initialize game with appropriate deck based on mode
+    room.deck = createDeck(room.gameMode);
     room.battlefield = [];
     room.throwInCards = [];
     room.gameState = 'playing';
@@ -247,6 +259,7 @@ function startGame(roomCode) {
     
     updatePlayerOrder(room);
     
+    console.log(`Game started in room ${roomCode} (${room.gameMode} mode) with ${activePlayers.length} players`);
     return true;
 }
 
@@ -281,6 +294,7 @@ function resetRoomForNewGame(room) {
     room.playerOrder = [];
     room.playAgainVotes.clear();
     room.roundNumber++;
+    // Game mode persists between rounds
     
     // Clear timers
     if (room.throwInTimer) {
@@ -301,12 +315,13 @@ function updatePlayerOrder(room) {
         .map(p => p.id);
 }
 
-// Get safe game state (hide opponent's cards)
+// Get safe game state (hide opponent's cards) - Updated to include game mode
 function getSafeGameState(room, playerId) {
     const player = room.players.find(p => p.id === playerId);
     const safeRoom = {
         code: room.code,
         maxPlayers: room.maxPlayers,
+        gameMode: room.gameMode, // Include game mode
         gameState: room.gameState,
         gamePhase: room.gamePhase,
         battlefield: room.battlefield,
@@ -348,9 +363,9 @@ function getSafeGameState(room, playerId) {
 io.on('connection', (socket) => {
     console.log('New connection:', socket.id);
     
-    // Create a new room
+    // Create a new room - Updated to handle game mode
     socket.on('createRoom', (data) => {
-        const { playerName, maxPlayers } = data;
+        const { playerName, maxPlayers, gameMode } = data;
         
         // Check if player is already in a room
         const existingRoomCode = playerRooms.get(socket.id);
@@ -364,7 +379,7 @@ io.on('connection', (socket) => {
         
         const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         
-        const room = createRoom(roomCode, socket.id, playerName, maxPlayers || 4);
+        const room = createRoom(roomCode, socket.id, playerName, maxPlayers || 4, gameMode || 'classic');
         socket.join(roomCode);
         
         socket.emit('roomCreated', {
@@ -372,7 +387,7 @@ io.on('connection', (socket) => {
             gameState: getSafeGameState(room, socket.id)
         });
         
-        console.log(`Room ${roomCode} created by ${playerName} (max ${room.maxPlayers} players)`);
+        console.log(`Room ${roomCode} created by ${playerName} (${room.gameMode} mode, max ${room.maxPlayers} players)`);
     });
     
     // Join an existing room
@@ -438,7 +453,7 @@ io.on('connection', (socket) => {
         });
         
         const status = isSpectator ? 'spectating' : 'playing';
-        console.log(`${playerName} joined room ${roomCode} as ${status}`);
+        console.log(`${playerName} joined room ${roomCode} (${room.gameMode} mode) as ${status}`);
     });
     
     // Handle player leaving
@@ -510,7 +525,7 @@ io.on('connection', (socket) => {
                         });
                     });
                     
-                    console.log(`Game started in room ${roomCode} with ${activePlayers.length} players`);
+                    console.log(`${room.gameMode} mode game started in room ${roomCode} with ${activePlayers.length} players`);
                 }
             } else {
                 io.to(roomCode).emit('playerReadyUpdate', {
