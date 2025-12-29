@@ -252,6 +252,71 @@ io.on('connection', (socket) => {
         }
     });
     
+    // Deflect attack (when defender has same rank)
+    socket.on('deflectAttack', (data) => {
+        const { cardIndex } = data;
+        const roomCode = playerRooms.get(socket.id);
+        const room = gameRooms.get(roomCode);
+        
+        if (!room || room.gameState !== 'playing') return;
+        if (room.currentDefender !== socket.id) return;
+        if (room.gamePhase !== 'defending') return;
+        
+        // Can only deflect if no cards have been defended yet
+        if (room.battlefield.some(pair => pair.defense)) {
+            socket.emit('error', { message: 'Cannot deflect after defending cards' });
+            return;
+        }
+        
+        const defender = room.players.find(p => p.id === socket.id);
+        const attacker = room.players.find(p => p.id === room.currentAttacker);
+        
+        if (cardIndex >= defender.hand.length) return;
+        const deflectCard = defender.hand[cardIndex];
+        
+        // Check if deflect card has same rank as any undefended attack
+        let canDeflect = false;
+        for (let pair of room.battlefield) {
+            if (!pair.defense && pair.attack.rank === deflectCard.rank) {
+                canDeflect = true;
+                break;
+            }
+        }
+        
+        if (!canDeflect) {
+            socket.emit('error', { message: 'You can only deflect with cards of the same rank' });
+            return;
+        }
+        
+        // Check if total attacks don't exceed attacker's hand size
+        const totalAttacks = room.battlefield.length + 1;
+        if (totalAttacks > Math.min(6, attacker.hand.length)) {
+            socket.emit('error', { message: 'Cannot deflect - would exceed card limit' });
+            return;
+        }
+        
+        // Add deflect card to battlefield as new attack
+        room.battlefield.push({ attack: deflectCard, defense: null });
+        defender.hand.splice(cardIndex, 1);
+        
+        // Switch roles - attacker becomes defender
+        const temp = room.currentAttacker;
+        room.currentAttacker = room.currentDefender;
+        room.currentDefender = temp;
+        
+        // Stay in defending phase
+        room.gamePhase = 'defending';
+        
+        // Notify all players
+        room.players.forEach(p => {
+            io.to(p.id).emit('attackDeflected', {
+                gameState: getSafeGameState(room, p.id),
+                deflectedBy: defender.name,
+                card: deflectCard
+            });
+        });
+    });
+    
     // Play a card (attack or defend)
     socket.on('playCard', (data) => {
         const { cardIndex } = data;
