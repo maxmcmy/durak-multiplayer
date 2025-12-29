@@ -153,6 +153,7 @@
 
         .player-name.current-turn {
             color: #667eea;
+            text-decoration: underline;
         }
 
         .cards-container {
@@ -472,6 +473,61 @@
             animation: pulse 1s infinite;
         }
 
+        .turn-indicator {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 15px;
+            font-size: 1.3em;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px auto;
+            max-width: 400px;
+            box-shadow: 0 5px 20px rgba(40, 167, 69, 0.3);
+            animation: slideIn 0.5s ease;
+        }
+
+        .turn-indicator.your-turn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            animation: pulse 2s infinite;
+        }
+
+        .turn-indicator.opponent-turn {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+        }
+
+        .turn-indicator.defend {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            animation: pulse 1.5s infinite;
+        }
+
+        .turn-indicator .action {
+            font-size: 0.9em;
+            margin-top: 5px;
+            opacity: 0.95;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .player-area.active-player {
+            border: 3px solid #28a745;
+            box-shadow: 0 0 20px rgba(40, 167, 69, 0.3);
+        }
+
+        .player-area.defending-player {
+            border: 3px solid #dc3545;
+            box-shadow: 0 0 20px rgba(220, 53, 69, 0.3);
+        }
+
         @keyframes pulse {
             0% { transform: scale(1); }
             50% { transform: scale(1.05); }
@@ -507,6 +563,16 @@
                 width: 250px;
                 bottom: 10px;
                 right: 10px;
+            }
+            
+            .turn-indicator {
+                font-size: 1.1em;
+                padding: 10px 15px;
+                margin: 15px auto;
+            }
+            
+            .turn-indicator .action {
+                font-size: 0.85em;
             }
         }
     </style>
@@ -559,7 +625,7 @@
     <div id="gameScreen" class="game-container hidden">
         <div class="game-header">
             <h1>🃏 Durak Multiplayer 🃏</h1>
-            <div id="gameMessage" class="message info">Waiting for game to start...</div>
+            <div id="gameMessage" class="message info hidden"></div>
         </div>
 
         <div class="game-info">
@@ -572,6 +638,11 @@
             <div class="info-box">
                 Deck: <span id="deckCount">36</span>
             </div>
+        </div>
+
+        <div id="turnIndicator" class="turn-indicator">
+            <div id="turnText">Waiting for game to start...</div>
+            <div id="turnAction" class="action"></div>
         </div>
 
         <div id="opponentArea" class="player-area">
@@ -697,12 +768,6 @@
                 gameState = data.gameState;
                 deflectMode = false; // Reset deflect mode
                 updateGameDisplay();
-                
-                if (data.action === 'attack') {
-                    showMessage('Card played for attack!', 'info');
-                } else {
-                    showMessage('Card played for defense!', 'info');
-                }
             });
             
             socket.on('attackDeflected', (data) => {
@@ -725,11 +790,9 @@
                 if (gameState.currentAttacker === socket.id) {
                     // Attacker can throw in cards
                     showThrowInTimer(true, data.validRanks, data.maxThrowIn, data.currentCards);
-                    showMessage(`Opponent is taking cards! You can add up to ${data.maxThrowIn} more cards!`, 'info');
                 } else {
                     // Defender sees timer
                     showThrowInTimer(false, data.validRanks, data.maxThrowIn, data.currentCards);
-                    showMessage('Taking cards... Opponent can add more cards!', 'error');
                 }
             });
             
@@ -752,14 +815,13 @@
                 gameState = data.gameState;
                 deflectMode = false; // Reset deflect mode
                 updateGameDisplay();
-                showMessage('Defense successful! Roles switched.', 'info');
+                showMessage('Defense successful!', 'success');
             });
             
             socket.on('attackEnded', (data) => {
                 gameState = data.gameState;
                 deflectMode = false; // Reset deflect mode
                 updateGameDisplay();
-                showMessage('Attack ended! Roles switched.', 'info');
             });
             
             socket.on('gameOver', (data) => {
@@ -892,6 +954,8 @@
             
             deflectMode = false; // Reset deflect mode
             updateGameDisplay();
+            
+            // Show initial game start message briefly
             showMessage('Game started! Good luck!', 'success');
         }
         
@@ -910,19 +974,88 @@
             document.getElementById('playerNameDisplay').textContent = me.name + ' (You)';
             document.getElementById('opponentName').textContent = opponent.name;
             
-            // Update turn indicators
+            // Update turn indicator and player area highlighting
+            const turnIndicator = document.getElementById('turnIndicator');
+            const turnText = document.getElementById('turnText');
+            const turnAction = document.getElementById('turnAction');
+            const playerArea = document.getElementById('playerArea');
+            const opponentArea = document.getElementById('opponentArea');
+            
+            // Remove all highlighting classes
+            playerArea.classList.remove('active-player', 'defending-player');
+            opponentArea.classList.remove('active-player', 'defending-player');
+            turnIndicator.classList.remove('your-turn', 'opponent-turn', 'defend');
+            
+            // Check if game hasn't started yet
+            if (gameState.gameState === 'waiting' || !gameState.currentAttacker) {
+                turnText.textContent = 'Waiting for game to start...';
+                turnAction.textContent = '';
+                turnIndicator.classList.add('opponent-turn');
+            }
+            // Update turn indicator based on game phase
+            else if (gameState.gamePhase === 'throwIn') {
+                if (gameState.currentAttacker === socket.id) {
+                    turnIndicator.classList.add('your-turn');
+                    turnText.textContent = '⚡ YOUR TURN - Throwing In!';
+                    turnAction.textContent = 'Add cards with matching ranks!';
+                    playerArea.classList.add('active-player');
+                } else {
+                    turnIndicator.classList.add('defend');
+                    turnText.textContent = '😰 Taking Cards...';
+                    turnAction.textContent = 'Opponent can add more cards!';
+                    playerArea.classList.add('defending-player');
+                }
+            } else if (gameState.currentAttacker === socket.id) {
+                turnIndicator.classList.add('your-turn');
+                playerArea.classList.add('active-player');
+                
+                if (gameState.gamePhase === 'attacking') {
+                    turnText.textContent = '⚔️ YOUR TURN - Attacking!';
+                    if (gameState.battlefield && gameState.battlefield.length > 0) {
+                        turnAction.textContent = 'Continue attack or end turn';
+                    } else {
+                        turnAction.textContent = 'Select a card to attack';
+                    }
+                } else if (gameState.gamePhase === 'defending') {
+                    turnText.textContent = '⏳ Waiting for Defense';
+                    turnAction.textContent = `${opponent.name} is defending...`;
+                    turnIndicator.classList.remove('your-turn');
+                    turnIndicator.classList.add('opponent-turn');
+                    opponentArea.classList.add('defending-player');
+                }
+            } else if (gameState.currentDefender === socket.id) {
+                if (gameState.gamePhase === 'defending') {
+                    turnIndicator.classList.add('defend');
+                    turnText.textContent = '🛡️ YOUR TURN - Defend!';
+                    const undefended = gameState.battlefield ? gameState.battlefield.filter(p => !p.defense).length : 0;
+                    if (undefended > 0) {
+                        turnAction.textContent = `Defend ${undefended} attack${undefended !== 1 ? 's' : ''} or take cards`;
+                    } else {
+                        turnAction.textContent = 'All attacks defended - Pass or wait';
+                    }
+                    playerArea.classList.add('defending-player');
+                } else if (gameState.gamePhase === 'attacking') {
+                    turnIndicator.classList.add('opponent-turn');
+                    turnText.textContent = `⏳ ${opponent.name}'s Turn`;
+                    turnAction.textContent = 'Waiting for attack...';
+                    opponentArea.classList.add('active-player');
+                }
+            } else {
+                turnIndicator.classList.add('opponent-turn');
+                if (gameState.currentAttacker !== socket.id && gameState.currentDefender !== socket.id) {
+                    turnText.textContent = `⏳ ${opponent.name}'s Turn`;
+                    turnAction.textContent = 'Waiting...';
+                    opponentArea.classList.add('active-player');
+                }
+            }
+            
+            // Update old turn indicators (keep for backward compatibility)
             if (gameState.currentAttacker === socket.id) {
                 document.getElementById('playerNameDisplay').classList.add('current-turn');
                 document.getElementById('opponentName').classList.remove('current-turn');
-                if (gameState.gamePhase === 'attacking') {
-                    showMessage('Your turn to attack!', 'info');
-                }
             } else if (gameState.currentDefender === socket.id) {
                 document.getElementById('playerNameDisplay').classList.add('current-turn');
                 document.getElementById('opponentName').classList.remove('current-turn');
-                if (gameState.gamePhase === 'defending') {
-                    showMessage('Defend against the attack!', 'info');
-                }
             } else {
                 document.getElementById('playerNameDisplay').classList.remove('current-turn');
                 document.getElementById('opponentName').classList.add('current-turn');
@@ -1188,6 +1321,12 @@
             const messageEl = document.getElementById('gameMessage');
             messageEl.textContent = text;
             messageEl.className = `message ${type}`;
+            messageEl.classList.remove('hidden');
+            
+            // Auto-hide message after 3 seconds
+            setTimeout(() => {
+                messageEl.classList.add('hidden');
+            }, 3000);
         }
         
         // Throw-in timer functions
