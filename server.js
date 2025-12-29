@@ -563,15 +563,16 @@ io.on('connection', (socket) => {
         
         const card = player.hand[cardIndex];
         
-        // Handle attack (initial attacker or additional attackers)
+        // Handle attack (initial attacker or additional attackers can attack at ANY time)
         if ((room.initialAttackerId === socket.id || room.additionalAttackers.includes(socket.id)) 
-            && room.gamePhase === 'attacking') {
+            && (room.gamePhase === 'attacking' || room.gamePhase === 'defending')) {
             
             // Check maximum attack limit
             const defender = room.players.find(p => p.id === room.currentDefenderId);
+            const totalAttacks = room.battlefield.filter(pair => !pair.defense).length;
             const maxAttacks = Math.min(MAX_BATTLEFIELD_SIZE, defender.hand.length);
             
-            if (room.battlefield.length >= maxAttacks) {
+            if (totalAttacks >= maxAttacks) {
                 socket.emit('error', { message: `Cannot attack with more than ${maxAttacks} cards` });
                 return;
             }
@@ -597,7 +598,11 @@ io.on('connection', (socket) => {
                 attackerId: socket.id 
             });
             player.hand.splice(cardIndex, 1);
-            room.gamePhase = 'defending';
+            
+            // Set phase to defending if there are undefended attacks
+            if (room.battlefield.some(pair => !pair.defense)) {
+                room.gamePhase = 'defending';
+            }
             
             // Notify all players
             room.players.forEach(p => {
@@ -625,7 +630,7 @@ io.on('connection', (socket) => {
                 
                 // Check if all attacks are defended
                 if (room.battlefield.every(pair => pair.defense)) {
-                    // Attackers can now continue attacking or end turn
+                    // All defended, but attackers can still add more cards
                     room.gamePhase = 'attacking';
                 }
                 
