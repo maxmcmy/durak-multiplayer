@@ -74,6 +74,7 @@ function createRoom(roomCode, creatorId, creatorName) {
         throwInDeadline: null,
         validThrowInRanks: new Set(),
         throwInCards: [], // Cards being thrown in after take
+        maxThrowInTotal: 6, // Maximum cards that can be given to defender
         turnTimer: null,
         lastAction: Date.now()
     };
@@ -266,6 +267,16 @@ io.on('connection', (socket) => {
         
         // Handle attack
         if (room.currentAttacker === socket.id && room.gamePhase === 'attacking') {
+            // Check maximum attack limit
+            const defender = room.players.find(p => p.id === room.currentDefender);
+            const undefendedAttacks = room.battlefield.filter(pair => !pair.defense).length;
+            const maxAttacks = Math.min(6, defender.hand.length);
+            
+            if (room.battlefield.length >= maxAttacks) {
+                socket.emit('error', { message: `Cannot attack with more than ${maxAttacks} cards (defender has ${defender.hand.length} cards)` });
+                return;
+            }
+            
             // Check if this card can be played
             if (room.battlefield.length > 0) {
                 const validRanks = new Set();
@@ -332,6 +343,14 @@ io.on('connection', (socket) => {
                 return;
             }
             
+            // Check if we've reached the limit
+            const totalCards = room.battlefield.length + room.throwInCards.length;
+            
+            if (totalCards >= room.maxThrowInTotal) {
+                socket.emit('error', { message: `Cannot add more cards - maximum ${room.maxThrowInTotal} cards total` });
+                return;
+            }
+            
             // Add card to throw-in pile
             room.throwInCards.push(card);
             player.hand.splice(cardIndex, 1);
@@ -340,7 +359,8 @@ io.on('connection', (socket) => {
             room.players.forEach(p => {
                 io.to(p.id).emit('throwInCard', {
                     gameState: getSafeGameState(room, p.id),
-                    card: card
+                    card: card,
+                    remainingCapacity: room.maxThrowInTotal - (room.battlefield.length + room.throwInCards.length)
                 });
             });
         }
@@ -359,6 +379,13 @@ io.on('connection', (socket) => {
         const defender = room.players.find(p => p.id === socket.id);
         const attacker = room.players.find(p => p.id === room.currentAttacker);
         
+        // Calculate how many cards the defender will take initially
+        const initialDefenderCards = defender.hand.length;
+        const battlefieldCards = room.battlefield.length;
+        
+        // Maximum total cards that can be given is min(6, initial defender hand size)
+        room.maxThrowInTotal = Math.min(6, initialDefenderCards);
+        
         // Collect valid ranks for throw-in
         room.validThrowInRanks.clear();
         room.battlefield.forEach(pair => {
@@ -371,11 +398,16 @@ io.on('connection', (socket) => {
         room.throwInCards = [];
         room.throwInDeadline = Date.now() + 3000; // 3 seconds from now
         
+        // Calculate remaining throw-in capacity
+        const remainingCapacity = room.maxThrowInTotal - battlefieldCards;
+        
         // Notify all players about throw-in phase
         room.players.forEach(p => {
             io.to(p.id).emit('throwInPhase', {
                 gameState: getSafeGameState(room, p.id),
-                validRanks: Array.from(room.validThrowInRanks)
+                validRanks: Array.from(room.validThrowInRanks),
+                maxThrowIn: remainingCapacity,
+                currentCards: battlefieldCards
             });
         });
         
