@@ -683,11 +683,11 @@
                 
                 if (gameState.currentAttacker === socket.id) {
                     // Attacker can throw in cards
-                    showThrowInTimer(true, data.validRanks);
-                    showMessage('Opponent is taking cards! You can add more cards with the same ranks!', 'info');
+                    showThrowInTimer(true, data.validRanks, data.maxThrowIn, data.currentCards);
+                    showMessage(`Opponent is taking cards! You can add up to ${data.maxThrowIn} more cards!`, 'info');
                 } else {
                     // Defender sees timer
-                    showThrowInTimer(false, data.validRanks);
+                    showThrowInTimer(false, data.validRanks, data.maxThrowIn, data.currentCards);
                     showMessage('Taking cards... Opponent can add more cards!', 'error');
                 }
             });
@@ -695,7 +695,7 @@
             socket.on('throwInCard', (data) => {
                 gameState = data.gameState;
                 updateGameDisplay();
-                updateThrowInDisplay(data.card);
+                updateThrowInDisplay(data.card, data.remainingCapacity);
             });
             
             socket.on('cardsTaken', (data) => {
@@ -1074,9 +1074,17 @@
         }
         
         // Throw-in timer functions
-        function showThrowInTimer(canThrowIn, validRanks) {
+        function showThrowInTimer(canThrowIn, validRanks, maxThrowIn, currentCards) {
             const timerDiv = document.getElementById('throwInTimer');
             timerDiv.classList.remove('hidden');
+            
+            // Update header to show limits
+            const header = timerDiv.querySelector('h2');
+            if (canThrowIn) {
+                header.textContent = `Opponent is taking ${currentCards} card${currentCards !== 1 ? 's' : ''}!`;
+            } else {
+                header.textContent = `Taking ${currentCards} card${currentCards !== 1 ? 's' : ''}...`;
+            }
             
             // Display valid ranks
             const ranksDiv = document.getElementById('validRanks');
@@ -1089,11 +1097,26 @@
             });
             
             // Clear throw-in cards display
-            document.getElementById('throwInCards').innerHTML = '';
+            const throwInCardsDiv = document.getElementById('throwInCards');
+            throwInCardsDiv.innerHTML = '';
             
-            // Show/hide done button based on role
+            // Add capacity info
+            if (canThrowIn && maxThrowIn > 0) {
+                const capacityInfo = document.createElement('div');
+                capacityInfo.className = 'throw-in-info';
+                capacityInfo.id = 'throwInCapacity';
+                capacityInfo.textContent = `You can add up to ${maxThrowIn} more card${maxThrowIn !== 1 ? 's' : ''}`;
+                throwInCardsDiv.appendChild(capacityInfo);
+            } else if (maxThrowIn === 0) {
+                const capacityInfo = document.createElement('div');
+                capacityInfo.className = 'throw-in-info';
+                capacityInfo.textContent = 'Maximum cards reached - cannot add more';
+                throwInCardsDiv.appendChild(capacityInfo);
+            }
+            
+            // Show/hide done button based on role and capacity
             const doneBtn = timerDiv.querySelector('button');
-            doneBtn.style.display = canThrowIn ? 'block' : 'none';
+            doneBtn.style.display = (canThrowIn && maxThrowIn > 0) ? 'block' : 'none';
             
             // Start countdown
             let timeLeft = 3;
@@ -1121,8 +1144,23 @@
             }
         }
         
-        function updateThrowInDisplay(card) {
+        function updateThrowInDisplay(card, remainingCapacity) {
             const throwInCardsDiv = document.getElementById('throwInCards');
+            
+            // Update capacity info
+            const capacityInfo = document.getElementById('throwInCapacity');
+            if (capacityInfo) {
+                if (remainingCapacity > 0) {
+                    capacityInfo.textContent = `You can add up to ${remainingCapacity} more card${remainingCapacity !== 1 ? 's' : ''}`;
+                } else {
+                    capacityInfo.textContent = 'Maximum cards reached - cannot add more';
+                    // Hide done button if max reached
+                    const doneBtn = document.querySelector('#throwInTimer button');
+                    if (doneBtn) doneBtn.style.display = 'none';
+                }
+            }
+            
+            // Add the thrown card
             const cardEl = document.createElement('div');
             cardEl.className = `card ${(card.suit === '♥' || card.suit === '♦') ? 'red' : 'black'}`;
             cardEl.innerHTML = `
