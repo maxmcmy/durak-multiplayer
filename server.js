@@ -1,4 +1,4 @@
-// server.js - Durak Multiplayer Server
+// server.js - Durak Multiplayer Server with Throw-In Feature
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -69,7 +69,11 @@ function createRoom(roomCode, creatorId, creatorName) {
         trumpSuit: '',
         currentAttacker: null,
         currentDefender: null,
-        gamePhase: 'waiting', // waiting, attacking, defending
+        gamePhase: 'waiting', // waiting, attacking, defending, throwIn
+        throwInTimer: null,
+        throwInDeadline: null,
+        validThrowInRanks: new Set(),
+        throwInCards: [], // Cards being thrown in after take
         turnTimer: null,
         lastAction: Date.now()
     };
@@ -87,6 +91,7 @@ function startGame(roomCode) {
     // Initialize game
     room.deck = createDeck();
     room.battlefield = [];
+    room.throwInCards = [];
     room.gameState = 'playing';
     room.gamePhase = 'attacking';
     
@@ -139,11 +144,14 @@ function getSafeGameState(room, playerId) {
         gameState: room.gameState,
         gamePhase: room.gamePhase,
         battlefield: room.battlefield,
+        throwInCards: room.throwInCards,
         deckCount: room.deck.length,
         trumpCard: room.trumpCard,
         trumpSuit: room.trumpSuit,
         currentAttacker: room.currentAttacker,
         currentDefender: room.currentDefender,
+        throwInDeadline: room.throwInDeadline,
+        validThrowInRanks: Array.from(room.validThrowInRanks),
         players: room.players.map(p => ({
             id: p.id,
             name: p.name,
@@ -316,10 +324,31 @@ io.on('connection', (socket) => {
             }
         }
         
+        // Handle throw-in phase
+        else if (room.currentAttacker === socket.id && room.gamePhase === 'throwIn') {
+            // Check if card rank is valid for throw-in
+            if (!room.validThrowInRanks.has(card.rank)) {
+                socket.emit('error', { message: 'You can only throw in cards with ranks that were already played' });
+                return;
+            }
+            
+            // Add card to throw-in pile
+            room.throwInCards.push(card);
+            player.hand.splice(cardIndex, 1);
+            
+            // Notify all players
+            room.players.forEach(p => {
+                io.to(p.id).emit('throwInCard', {
+                    gameState: getSafeGameState(room, p.id),
+                    card: card
+                });
+            });
+        }
+        
         checkGameEnd(room);
     });
     
-    // Take cards
+    // Take cards - now with throw-in phase
     socket.on('takeCards', () => {
         const roomCode = playerRooms.get(socket.id);
         const room = gameRooms.get(roomCode);
@@ -330,33 +359,51 @@ io.on('connection', (socket) => {
         const defender = room.players.find(p => p.id === socket.id);
         const attacker = room.players.find(p => p.id === room.currentAttacker);
         
-        // Defender takes all cards from battlefield
+        // Collect valid ranks for throw-in
+        room.validThrowInRanks.clear();
         room.battlefield.forEach(pair => {
-            defender.hand.push(pair.attack);
-            if (pair.defense) defender.hand.push(pair.defense);
+            room.validThrowInRanks.add(pair.attack.rank);
+            if (pair.defense) room.validThrowInRanks.add(pair.defense.rank);
         });
-        room.battlefield = [];
         
-        // Draw cards
-        while (attacker.hand.length < 6 && room.deck.length > 0) {
-            attacker.hand.push(room.deck.pop());
-        }
-        while (defender.hand.length < 6 && room.deck.length > 0) {
-            defender.hand.push(room.deck.pop());
-        }
+        // Enter throw-in phase
+        room.gamePhase = 'throwIn';
+        room.throwInCards = [];
+        room.throwInDeadline = Date.now() + 3000; // 3 seconds from now
         
-        // Attacker continues
-        room.gamePhase = 'attacking';
-        
-        // Notify all players
+        // Notify all players about throw-in phase
         room.players.forEach(p => {
-            io.to(p.id).emit('cardsTaken', {
+            io.to(p.id).emit('throwInPhase', {
                 gameState: getSafeGameState(room, p.id),
-                playerId: socket.id
+                validRanks: Array.from(room.validThrowInRanks)
             });
         });
         
-        checkGameEnd(room);
+        // Set timer to complete the take after 3 seconds
+        if (room.throwInTimer) {
+            clearTimeout(room.throwInTimer);
+        }
+        
+        room.throwInTimer = setTimeout(() => {
+            completeTakeCards(room);
+        }, 3000);
+    });
+    
+    // Complete throw-in phase early
+    socket.on('finishThrowIn', () => {
+        const roomCode = playerRooms.get(socket.id);
+        const room = gameRooms.get(roomCode);
+        
+        if (!room || room.gameState !== 'playing') return;
+        if (room.currentAttacker !== socket.id || room.gamePhase !== 'throwIn') return;
+        
+        // Clear timer and complete take
+        if (room.throwInTimer) {
+            clearTimeout(room.throwInTimer);
+            room.throwInTimer = null;
+        }
+        
+        completeTakeCards(room);
     });
     
     // Pass (successful defense)
@@ -373,6 +420,7 @@ io.on('connection', (socket) => {
         
         // Clear battlefield
         room.battlefield = [];
+        room.throwInCards = [];
         
         // Draw cards
         while (attacker.hand.length < 6 && room.deck.length > 0) {
@@ -412,6 +460,7 @@ io.on('connection', (socket) => {
         
         // Clear battlefield
         room.battlefield = [];
+        room.throwInCards = [];
         
         // Draw cards
         while (attacker.hand.length < 6 && room.deck.length > 0) {
@@ -463,6 +512,12 @@ io.on('connection', (socket) => {
             const player = room.players.find(p => p.id === socket.id);
             if (player) {
                 player.connected = false;
+                
+                // Clear any active timers
+                if (room.throwInTimer) {
+                    clearTimeout(room.throwInTimer);
+                    room.throwInTimer = null;
+                }
                 
                 // Notify other players
                 io.to(roomCode).emit('playerDisconnected', {
@@ -517,6 +572,49 @@ io.on('connection', (socket) => {
         }
     });
 });
+
+// Helper function to complete taking cards after throw-in
+function completeTakeCards(room) {
+    const defender = room.players.find(p => p.id === room.currentDefender);
+    const attacker = room.players.find(p => p.id === room.currentAttacker);
+    
+    // Defender takes all cards from battlefield and throw-in pile
+    room.battlefield.forEach(pair => {
+        defender.hand.push(pair.attack);
+        if (pair.defense) defender.hand.push(pair.defense);
+    });
+    
+    // Add throw-in cards
+    room.throwInCards.forEach(card => {
+        defender.hand.push(card);
+    });
+    
+    room.battlefield = [];
+    room.throwInCards = [];
+    room.validThrowInRanks.clear();
+    
+    // Draw cards (attacker draws first)
+    while (attacker.hand.length < 6 && room.deck.length > 0) {
+        attacker.hand.push(room.deck.pop());
+    }
+    while (defender.hand.length < 6 && room.deck.length > 0) {
+        defender.hand.push(room.deck.pop());
+    }
+    
+    // Attacker continues
+    room.gamePhase = 'attacking';
+    room.throwInDeadline = null;
+    
+    // Notify all players
+    room.players.forEach(p => {
+        io.to(p.id).emit('cardsTaken', {
+            gameState: getSafeGameState(room, p.id),
+            totalCards: room.battlefield.length + room.throwInCards.length
+        });
+    });
+    
+    checkGameEnd(room);
+}
 
 // Helper function to check if a card can defend
 function canDefend(defenseCard, attackCard) {
