@@ -1537,7 +1537,8 @@
                 deflectMode = false;
             } else if ((gameState.initialAttackerId === socket.id || 
                        (gameState.additionalAttackers && gameState.additionalAttackers.includes(socket.id))) 
-                      && (gameState.gamePhase === 'attacking' || gameState.gamePhase === 'throwIn')) {
+                      && (gameState.gamePhase === 'attacking' || gameState.gamePhase === 'defending' || gameState.gamePhase === 'throwIn')) {
+                // Attackers can now play during both attacking AND defending phases
                 socket.emit('playCard', { cardIndex: index });
                 selectedCard = null;
             } else if (gameState.currentDefenderId === socket.id && gameState.gamePhase === 'defending') {
