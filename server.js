@@ -565,7 +565,7 @@ io.on('connection', (socket) => {
         }
     });
     
-    // Play a card (attack or defend)
+    // Play a card (attack only - defend is now separate)
     socket.on('playCard', (data) => {
         const { cardIndex } = data;
         const roomCode = playerRooms.get(socket.id);
@@ -584,15 +584,15 @@ io.on('connection', (socket) => {
             
             // Check maximum attack limit
             const defender = room.players.find(p => p.id === room.currentDefenderId);
-            const totalAttacks = room.battlefield.filter(pair => !pair.defense).length;
+            const undefendedAttacks = room.battlefield.filter(pair => !pair.defense).length;
             const maxAttacks = Math.min(MAX_BATTLEFIELD_SIZE, defender.hand.length);
             
-            if (totalAttacks >= maxAttacks) {
+            if (undefendedAttacks >= maxAttacks) {
                 socket.emit('error', { message: `Cannot attack with more than ${maxAttacks} cards` });
                 return;
             }
             
-            // Check if this card can be played
+            // First attack can be any card, subsequent attacks must match ranks
             if (room.battlefield.length > 0) {
                 const validRanks = new Set();
                 room.battlefield.forEach(pair => {
@@ -601,7 +601,7 @@ io.on('connection', (socket) => {
                 });
                 
                 if (!validRanks.has(card.rank)) {
-                    socket.emit('error', { message: 'Invalid card for attack' });
+                    socket.emit('error', { message: 'You can only add cards with ranks that are already on the battlefield' });
                     return;
                 }
             }
@@ -630,40 +630,6 @@ io.on('connection', (socket) => {
             });
             
             checkForWinner(room, player);
-        }
-        
-        // Handle defense
-        else if (room.currentDefenderId === socket.id && room.gamePhase === 'defending') {
-            // Find undefended attack
-            const undefended = room.battlefield.find(pair => !pair.defense);
-            if (!undefended) return;
-            
-            // Check if card can defend
-            if (canDefend(card, undefended.attack)) {
-                undefended.defense = card;
-                player.hand.splice(cardIndex, 1);
-                
-                // Check if all attacks are defended
-                if (room.battlefield.every(pair => pair.defense)) {
-                    // All defended, but attackers can still add more cards
-                    room.gamePhase = 'attacking';
-                }
-                
-                // Notify all players
-                room.players.forEach(p => {
-                    io.to(p.id).emit('cardPlayed', {
-                        gameState: getSafeGameState(room, p.id),
-                        action: 'defend',
-                        playerId: socket.id,
-                        playerName: player.name,
-                        allDefended: room.battlefield.every(pair => pair.defense)
-                    });
-                });
-                
-                checkForWinner(room, player);
-            } else {
-                socket.emit('error', { message: 'This card cannot defend' });
-            }
         }
         
         // Handle throw-in phase
@@ -701,6 +667,56 @@ io.on('connection', (socket) => {
             });
             
             checkForWinner(room, player);
+        }
+    });
+    
+    // Defend against a specific attack
+    socket.on('defendCard', (data) => {
+        const { cardIndex, targetIndex } = data;
+        const roomCode = playerRooms.get(socket.id);
+        const room = gameRooms.get(roomCode);
+        
+        if (!room || room.gameState !== 'playing') return;
+        if (room.currentDefenderId !== socket.id || room.gamePhase !== 'defending') return;
+        
+        const player = room.players.find(p => p.id === socket.id);
+        if (!player || cardIndex >= player.hand.length) return;
+        
+        // Check if target attack exists and is undefended
+        if (targetIndex >= room.battlefield.length || targetIndex < 0) return;
+        if (room.battlefield[targetIndex].defense) {
+            socket.emit('error', { message: 'This attack is already defended' });
+            return;
+        }
+        
+        const card = player.hand[cardIndex];
+        const targetAttack = room.battlefield[targetIndex].attack;
+        
+        // Check if card can defend
+        if (canDefend(card, targetAttack)) {
+            room.battlefield[targetIndex].defense = card;
+            player.hand.splice(cardIndex, 1);
+            
+            // Check if all attacks are defended
+            if (room.battlefield.every(pair => pair.defense)) {
+                // All defended, attackers can continue
+                room.gamePhase = 'attacking';
+            }
+            
+            // Notify all players
+            room.players.forEach(p => {
+                io.to(p.id).emit('cardPlayed', {
+                    gameState: getSafeGameState(room, p.id),
+                    action: 'defend',
+                    playerId: socket.id,
+                    playerName: player.name,
+                    allDefended: room.battlefield.every(pair => pair.defense)
+                });
+            });
+            
+            checkForWinner(room, player);
+        } else {
+            socket.emit('error', { message: 'This card cannot defend against that attack' });
         }
     });
     
