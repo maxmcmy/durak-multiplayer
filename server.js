@@ -797,10 +797,13 @@ io.on('connection', (socket) => {
         });
         defender.hand.splice(cardIndex, 1);
         
+        // The deflector becomes the new main attacker
+        room.initialAttackerId = socket.id;  // Person who deflected becomes main attacker
+        
         // Update defender to next player
         room.currentDefenderId = nextDefender.id;
         
-        // Update who can attack (everyone except new defender)
+        // Update who can attack (everyone except new defender and new main attacker)
         room.additionalAttackers = getAttackers(room).filter(p => p.id !== room.initialAttackerId).map(p => p.id);
         
         // Stay in defending phase
@@ -812,6 +815,7 @@ io.on('connection', (socket) => {
                 gameState: getSafeGameState(room, p.id),
                 deflectedBy: defender.name,
                 newDefender: nextDefender.name,
+                newAttacker: defender.name,  // Include who is now the main attacker
                 card: deflectCard
             });
         });
