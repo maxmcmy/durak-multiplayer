@@ -453,6 +453,31 @@
             font-size: 0.9em;
         }
 
+        .card.deflectable {
+            border: 3px solid #ffd700;
+            box-shadow: 0 0 10px #ffd700;
+        }
+
+        .card.deflectable:hover {
+            transform: translateY(-15px) scale(1.05);
+            box-shadow: 0 10px 30px rgba(255, 215, 0, 0.5);
+        }
+
+        button#deflectBtn {
+            background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%);
+        }
+
+        button#deflectBtn.active {
+            background: linear-gradient(135deg, #ff8c00 0%, #ff4500 100%);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
         .hidden {
             display: none;
         }
@@ -574,6 +599,7 @@
         <div class="controls">
             <button id="passBtn" onclick="pass()" disabled>Pass</button>
             <button id="takeBtn" onclick="takeCards()" disabled>Take Cards</button>
+            <button id="deflectBtn" onclick="toggleDeflectMode()" disabled>Deflect Attack</button>
             <button id="endAttackBtn" onclick="endAttack()" disabled>End Attack</button>
             <button onclick="leaveGame()" style="background: #dc3545;">Leave Game</button>
         </div>
@@ -621,6 +647,7 @@
         let selectedCard = null;
         let myHand = [];
         let throwInInterval = null;
+        let deflectMode = false;
         
         // Connect to server
         function connectToServer() {
@@ -668,6 +695,7 @@
             
             socket.on('cardPlayed', (data) => {
                 gameState = data.gameState;
+                deflectMode = false; // Reset deflect mode
                 updateGameDisplay();
                 
                 if (data.action === 'attack') {
@@ -677,8 +705,21 @@
                 }
             });
             
+            socket.on('attackDeflected', (data) => {
+                gameState = data.gameState;
+                deflectMode = false;
+                updateGameDisplay();
+                
+                if (gameState.currentDefender === socket.id) {
+                    showMessage(`${data.deflectedBy} deflected the attack back to you! Defend against all cards!`, 'error');
+                } else {
+                    showMessage(`You deflected the attack! ${data.deflectedBy === playerInfo.name ? 'Your opponent' : data.deflectedBy} must now defend!`, 'success');
+                }
+            });
+            
             socket.on('throwInPhase', (data) => {
                 gameState = data.gameState;
+                deflectMode = false; // Reset deflect mode
                 updateGameDisplay();
                 
                 if (gameState.currentAttacker === socket.id) {
@@ -694,12 +735,14 @@
             
             socket.on('throwInCard', (data) => {
                 gameState = data.gameState;
+                deflectMode = false; // Reset deflect mode
                 updateGameDisplay();
                 updateThrowInDisplay(data.card, data.remainingCapacity);
             });
             
             socket.on('cardsTaken', (data) => {
                 gameState = data.gameState;
+                deflectMode = false; // Reset deflect mode
                 hideThrowInTimer();
                 updateGameDisplay();
                 showMessage(`Cards taken! (${data.totalCards} total)`, 'info');
@@ -707,12 +750,14 @@
             
             socket.on('passed', (data) => {
                 gameState = data.gameState;
+                deflectMode = false; // Reset deflect mode
                 updateGameDisplay();
                 showMessage('Defense successful! Roles switched.', 'info');
             });
             
             socket.on('attackEnded', (data) => {
                 gameState = data.gameState;
+                deflectMode = false; // Reset deflect mode
                 updateGameDisplay();
                 showMessage('Attack ended! Roles switched.', 'info');
             });
@@ -845,6 +890,7 @@
             document.getElementById('chatContainer').style.display = 'block';
             document.getElementById('gameRoomCode').textContent = roomInfo.code;
             
+            deflectMode = false; // Reset deflect mode
             updateGameDisplay();
             showMessage('Game started! Good luck!', 'success');
         }
@@ -905,6 +951,23 @@
             playerCardsEl.innerHTML = '';
             
             if (myHand && myHand.length > 0) {
+                // Check for deflectable conditions
+                let deflectableRanks = new Set();
+                let canDeflect = false;
+                
+                if (gameState.currentDefender === socket.id && 
+                    gameState.gamePhase === 'defending' && 
+                    gameState.battlefield && 
+                    !gameState.battlefield.some(pair => pair.defense)) {
+                    // Get ranks of undefended attacks
+                    gameState.battlefield.forEach(pair => {
+                        if (!pair.defense) {
+                            deflectableRanks.add(pair.attack.rank);
+                        }
+                    });
+                    canDeflect = myHand.some(card => deflectableRanks.has(card.rank));
+                }
+                
                 // Create a sorted copy for display, but keep track of original indices
                 const cardsWithIndices = myHand.map((card, originalIndex) => ({
                     ...card,
@@ -920,13 +983,21 @@
                 cardsWithIndices.forEach((card, displayIndex) => {
                     const cardEl = document.createElement('div');
                     cardEl.className = `card ${(card.suit === '♥' || card.suit === '♦') ? 'red' : 'black'}`;
+                    
+                    // Highlight deflectable cards when in deflect mode
+                    if (deflectMode && deflectableRanks.has(card.rank)) {
+                        cardEl.classList.add('deflectable');
+                    }
+                    
                     if (selectedCard === displayIndex) {
                         cardEl.classList.add('selected');
                     }
+                    
                     cardEl.innerHTML = `
                         <div>${card.rank}</div>
                         <div>${card.suit}</div>
                         ${card.isTrump ? '<small>Trump</small>' : ''}
+                        ${deflectMode && deflectableRanks.has(card.rank) ? '<small>Can Deflect!</small>' : ''}
                     `;
                     // Pass the original index, not the display index
                     cardEl.onclick = () => selectCard(card.originalIndex, displayIndex);
@@ -1001,12 +1072,21 @@
             updateButtonStates();
         }
         
-        // FIXED selectCard function - now takes original index and handles throw-in
+        // FIXED selectCard function - now takes original index and handles throw-in and deflection
         function selectCard(originalIndex, displayIndex) {
             if (gameState.gameState !== 'playing') return;
             
             selectedCard = displayIndex;
             updateGameDisplay();
+            
+            // Handle deflection mode
+            if (deflectMode && gameState.currentDefender === socket.id && gameState.gamePhase === 'defending') {
+                socket.emit('deflectAttack', { cardIndex: originalIndex });
+                selectedCard = null;
+                deflectMode = false;
+                updateGameDisplay();
+                return;
+            }
             
             // Auto-play the card using the original index
             if (gameState.currentAttacker === socket.id && gameState.gamePhase === 'attacking') {
@@ -1022,13 +1102,29 @@
             }
         }
         
+        function toggleDeflectMode() {
+            deflectMode = !deflectMode;
+            const deflectBtn = document.getElementById('deflectBtn');
+            if (deflectMode) {
+                deflectBtn.classList.add('active');
+                deflectBtn.textContent = 'Cancel Deflect';
+                showMessage('Click a card with the same rank to deflect the attack!', 'info');
+            } else {
+                deflectBtn.classList.remove('active');
+                deflectBtn.textContent = 'Deflect Attack';
+            }
+            updateGameDisplay();
+        }
+        
         function pass() {
             if (!socket) return;
+            deflectMode = false;
             socket.emit('pass');
         }
         
         function takeCards() {
             if (!socket) return;
+            deflectMode = false;
             socket.emit('takeCards');
         }
         
@@ -1041,10 +1137,13 @@
             const passBtn = document.getElementById('passBtn');
             const takeBtn = document.getElementById('takeBtn');
             const endAttackBtn = document.getElementById('endAttackBtn');
+            const deflectBtn = document.getElementById('deflectBtn');
             
             passBtn.disabled = true;
             takeBtn.disabled = true;
             endAttackBtn.disabled = true;
+            deflectBtn.disabled = true;
+            deflectBtn.style.display = 'none';
             
             if (!gameState || gameState.gameState !== 'playing') return;
             
@@ -1054,6 +1153,24 @@
             }
             
             if (gameState.currentDefender === socket.id && gameState.gamePhase === 'defending') {
+                // Check if deflection is possible
+                if (gameState.battlefield && !gameState.battlefield.some(pair => pair.defense)) {
+                    // Get ranks of undefended attacks
+                    const attackRanks = new Set();
+                    gameState.battlefield.forEach(pair => {
+                        if (!pair.defense) {
+                            attackRanks.add(pair.attack.rank);
+                        }
+                    });
+                    
+                    // Check if player has cards with same rank
+                    const canDeflect = myHand.some(card => attackRanks.has(card.rank));
+                    if (canDeflect) {
+                        deflectBtn.disabled = false;
+                        deflectBtn.style.display = 'inline-block';
+                    }
+                }
+                
                 if (gameState.battlefield && gameState.battlefield.every(pair => pair.defense)) {
                     passBtn.disabled = false;
                 } else {
