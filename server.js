@@ -592,6 +592,14 @@ io.on('connection', (socket) => {
         if ((room.initialAttackerId === socket.id || room.additionalAttackers.includes(socket.id)) 
             && (room.gamePhase === 'attacking' || room.gamePhase === 'defending')) {
             
+            // NEW RULE: Only main attacker can place the first card
+            if (room.battlefield.length === 0 && room.gamePhase === 'attacking') {
+                if (room.initialAttackerId !== socket.id) {
+                    socket.emit('error', { message: 'Wait for the main attacker to play first' });
+                    return;
+                }
+            }
+            
             // Check maximum attack limit
             const defender = room.players.find(p => p.id === room.currentDefenderId);
             const undefendedAttacks = room.battlefield.filter(pair => !pair.defense).length;
