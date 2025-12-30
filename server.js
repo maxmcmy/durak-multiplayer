@@ -38,6 +38,33 @@ const classicRankValues = {'6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q
 const ultimateRanks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 const ultimateRankValues = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14};
 
+// Helper function to find a player by their socket ID more reliably
+function findPlayerBySocketId(room, socketId) {
+    // First try direct match
+    let player = room.players.find(p => p.id === socketId);
+    
+    // If not found and we have socket.io instance, check if it's a reconnection
+    if (!player && io.sockets.sockets.get(socketId)) {
+        // Check if any player has disconnected status but same name
+        const socket = io.sockets.sockets.get(socketId);
+        const playerName = socket.playerName;
+        if (playerName) {
+            player = room.players.find(p => p.name === playerName && !p.connected);
+            if (player) {
+                // Update the player's socket ID
+                const oldId = player.id;
+                player.id = socketId;
+                player.connected = true;
+                // Update playerRooms mapping
+                playerRooms.delete(oldId);
+                playerRooms.set(socketId, room.code);
+            }
+        }
+    }
+    
+    return player;
+}
+
 // Create a new deck based on game mode
 function createDeck(gameMode = 'classic') {
     const deck = [];
@@ -324,7 +351,7 @@ function updatePlayerOrder(room) {
 
 // Get safe game state (hide opponent's cards) - Updated to include game mode
 function getSafeGameState(room, playerId) {
-    const player = room.players.find(p => p.id === playerId);
+    const player = findPlayerBySocketId(room, playerId);
     const safeRoom = {
         code: room.code,
         maxPlayers: room.maxPlayers,
@@ -352,7 +379,8 @@ function getSafeGameState(room, playerId) {
             ready: p.ready,
             position: p.position,
             cardCount: p.hand.length,
-            hand: p.id === playerId ? p.hand : null,
+            // Important: Check both direct ID match and player object reference
+            hand: (p.id === playerId || (player && p.id === player.id)) ? p.hand : null,
             connected: p.connected,
             isActive: p.isActive,
             hasWon: p.hasWon,
@@ -370,9 +398,15 @@ function getSafeGameState(room, playerId) {
 io.on('connection', (socket) => {
     console.log('New connection:', socket.id);
     
+    // Store player name on socket for reconnection handling
+    socket.playerName = null;
+    
     // Create a new room - Updated to handle game mode
     socket.on('createRoom', (data) => {
         const { playerName, maxPlayers, gameMode } = data;
+        
+        // Store player name on socket object
+        socket.playerName = playerName;
         
         // Check if player is already in a room
         const existingRoomCode = playerRooms.get(socket.id);
@@ -402,13 +436,45 @@ io.on('connection', (socket) => {
         const { roomCode, playerName } = data;
         const room = gameRooms.get(roomCode);
         
+        // Store player name on socket object
+        socket.playerName = playerName;
+        
         if (!room) {
             socket.emit('error', { message: 'Room not found' });
             return;
         }
         
-        // Check if player is already in this room (might be reconnecting)
-        const existingPlayer = room.players.find(p => p.id === socket.id);
+        // Check if this is a reconnection (same player name)
+        let existingPlayer = room.players.find(p => p.name === playerName);
+        
+        if (existingPlayer && existingPlayer.id !== socket.id) {
+            // This is a reconnection with a new socket ID
+            console.log(`Player ${playerName} reconnecting with new socket ID`);
+            
+            // Update the player's socket ID
+            const oldId = existingPlayer.id;
+            existingPlayer.id = socket.id;
+            existingPlayer.connected = true;
+            
+            // Update player room mapping
+            playerRooms.delete(oldId);
+            playerRooms.set(socket.id, roomCode);
+            
+            socket.join(roomCode);
+            
+            socket.emit('roomJoined', {
+                gameState: getSafeGameState(room, socket.id)
+            });
+            
+            io.to(roomCode).emit('playerReconnected', {
+                playerId: socket.id,
+                playerName: existingPlayer.name
+            });
+            return;
+        }
+        
+        // Check if player is already in this room with same socket ID
+        existingPlayer = room.players.find(p => p.id === socket.id);
         if (existingPlayer) {
             // Reconnection - just update connection status
             existingPlayer.connected = true;
@@ -517,7 +583,7 @@ io.on('connection', (socket) => {
         
         if (!room) return;
         
-        const player = room.players.find(p => p.id === socket.id);
+        const player = findPlayerBySocketId(room, socket.id);
         if (player && !player.isSpectator) {
             player.ready = true;
             
@@ -525,11 +591,18 @@ io.on('connection', (socket) => {
             const activePlayers = room.players.filter(p => !p.isSpectator);
             if (activePlayers.length >= MIN_PLAYERS && activePlayers.every(p => p.ready)) {
                 if (startGame(roomCode)) {
-                    // Send game state to each player with their own cards visible
+                    // IMPORTANT: Send game state with updated socket IDs
+                    // Refresh socket room membership to ensure proper delivery
                     room.players.forEach(p => {
-                        io.to(p.id).emit('gameStarted', {
-                            gameState: getSafeGameState(room, p.id)
-                        });
+                        // Ensure socket is in the room
+                        const playerSocket = io.sockets.sockets.get(p.id);
+                        if (playerSocket) {
+                            playerSocket.join(roomCode);
+                            // Send personalized game state
+                            playerSocket.emit('gameStarted', {
+                                gameState: getSafeGameState(room, p.id)
+                            });
+                        }
                     });
                     
                     console.log(`${room.gameMode} mode game started in room ${roomCode} with ${activePlayers.length} players`);
@@ -550,15 +623,15 @@ io.on('connection', (socket) => {
         
         if (!room || room.gameState !== 'voting') return;
         
-        const player = room.players.find(p => p.id === socket.id);
+        const player = findPlayerBySocketId(room, socket.id);
         if (!player) return;
         
         player.votedPlayAgain = vote;
-        room.playAgainVotes.set(socket.id, vote);
+        room.playAgainVotes.set(player.id, vote);
         
         // Notify others of the vote
         io.to(roomCode).emit('playerVoted', {
-            playerId: socket.id,
+            playerId: player.id,
             playerName: player.name,
             vote: vote,
             totalVotes: room.playAgainVotes.size,
@@ -580,7 +653,7 @@ io.on('connection', (socket) => {
         
         if (!room || room.gameState !== 'playing') return;
         
-        const player = room.players.find(p => p.id === socket.id);
+        const player = findPlayerBySocketId(room, socket.id);
         if (!player || player.isSpectator || cardIndex >= player.hand.length) return;
         
         const card = player.hand[cardIndex];
@@ -589,12 +662,12 @@ io.on('connection', (socket) => {
         card.isTrump = card.suit === room.trumpSuit;
         
         // Handle attack (initial attacker or additional attackers can attack at ANY time)
-        if ((room.initialAttackerId === socket.id || room.additionalAttackers.includes(socket.id)) 
+        if ((room.initialAttackerId === player.id || room.additionalAttackers.includes(player.id)) 
             && (room.gamePhase === 'attacking' || room.gamePhase === 'defending')) {
             
             // NEW RULE: Only main attacker can place the first card
             if (room.battlefield.length === 0 && room.gamePhase === 'attacking') {
-                if (room.initialAttackerId !== socket.id) {
+                if (room.initialAttackerId !== player.id) {
                     socket.emit('error', { message: 'Wait for the main attacker to play first' });
                     return;
                 }
@@ -628,7 +701,7 @@ io.on('connection', (socket) => {
             room.battlefield.push({ 
                 attack: card, 
                 defense: null,
-                attackerId: socket.id 
+                attackerId: player.id 
             });
             player.hand.splice(cardIndex, 1);
             
@@ -642,7 +715,7 @@ io.on('connection', (socket) => {
                 io.to(p.id).emit('cardPlayed', {
                     gameState: getSafeGameState(room, p.id),
                     action: 'attack',
-                    playerId: socket.id,
+                    playerId: player.id,
                     playerName: player.name
                 });
             });
@@ -651,7 +724,7 @@ io.on('connection', (socket) => {
         }
         
         // Handle throw-in phase
-        else if ((room.initialAttackerId === socket.id || room.additionalAttackers.includes(socket.id))
+        else if ((room.initialAttackerId === player.id || room.additionalAttackers.includes(player.id))
                  && room.gamePhase === 'throwIn') {
             // Check if card rank is valid for throw-in
             if (!room.validThrowInRanks.has(card.rank)) {
@@ -670,7 +743,7 @@ io.on('connection', (socket) => {
             // Add card to throw-in pile
             room.throwInCards.push({
                 card: card,
-                playerId: socket.id
+                playerId: player.id
             });
             player.hand.splice(cardIndex, 1);
             
@@ -697,7 +770,7 @@ io.on('connection', (socket) => {
         if (!room || room.gameState !== 'playing') return;
         if (room.currentDefenderId !== socket.id || room.gamePhase !== 'defending') return;
         
-        const player = room.players.find(p => p.id === socket.id);
+        const player = findPlayerBySocketId(room, socket.id);
         if (!player || cardIndex >= player.hand.length) return;
         
         // Check if target attack exists and is undefended
@@ -733,7 +806,7 @@ io.on('connection', (socket) => {
                 io.to(p.id).emit('cardPlayed', {
                     gameState: getSafeGameState(room, p.id),
                     action: 'defend',
-                    playerId: socket.id,
+                    playerId: player.id,
                     playerName: player.name,
                     allDefended: room.battlefield.every(pair => pair.defense)
                 });
@@ -762,7 +835,7 @@ io.on('connection', (socket) => {
             return;
         }
         
-        const defender = room.players.find(p => p.id === socket.id);
+        const defender = findPlayerBySocketId(room, socket.id);
         const nextDefender = getNextActivePlayer(room, socket.id);
         
         if (!nextDefender) {
@@ -801,12 +874,12 @@ io.on('connection', (socket) => {
         room.battlefield.push({ 
             attack: deflectCard, 
             defense: null,
-            attackerId: socket.id 
+            attackerId: defender.id 
         });
         defender.hand.splice(cardIndex, 1);
         
         // The deflector becomes the new main attacker
-        room.initialAttackerId = socket.id;  // Person who deflected becomes main attacker
+        room.initialAttackerId = defender.id;  // Person who deflected becomes main attacker
         
         // Update defender to next player
         room.currentDefenderId = nextDefender.id;
@@ -839,7 +912,7 @@ io.on('connection', (socket) => {
         if (!room || room.gameState !== 'playing') return;
         if (room.currentDefenderId !== socket.id) return;
         
-        const defender = room.players.find(p => p.id === socket.id);
+        const defender = findPlayerBySocketId(room, socket.id);
         
         // Calculate how many cards the defender will take initially
         const initialDefenderCards = defender.hand.length;
@@ -889,7 +962,9 @@ io.on('connection', (socket) => {
         const room = gameRooms.get(roomCode);
         
         if (!room || room.gameState !== 'playing') return;
-        if (room.initialAttackerId !== socket.id || room.gamePhase !== 'throwIn') return;
+        
+        const player = findPlayerBySocketId(room, socket.id);
+        if (!player || room.initialAttackerId !== player.id || room.gamePhase !== 'throwIn') return;
         
         // Clear timer and complete take
         if (room.throwInTimer) {
@@ -906,7 +981,9 @@ io.on('connection', (socket) => {
         const room = gameRooms.get(roomCode);
         
         if (!room || room.gameState !== 'playing') return;
-        if (room.initialAttackerId !== socket.id) return;
+        
+        const player = findPlayerBySocketId(room, socket.id);
+        if (!player || room.initialAttackerId !== player.id) return;
         
         // Can end attack if:
         // 1. All attacks are defended (defender succeeded)
@@ -925,7 +1002,7 @@ io.on('connection', (socket) => {
         
         if (!room) return;
         
-        const player = room.players.find(p => p.id === socket.id);
+        const player = findPlayerBySocketId(room, socket.id);
         if (!player) return;
         
         io.to(roomCode).emit('newMessage', {
@@ -1170,6 +1247,14 @@ function completeVoting(room) {
     if (yesVotes >= MIN_PLAYERS) {
         // Reset for new game
         resetRoomForNewGame(room);
+        
+        // Ensure all staying players get proper socket room membership
+        room.players.forEach(p => {
+            const playerSocket = io.sockets.sockets.get(p.id);
+            if (playerSocket) {
+                playerSocket.join(room.code);
+            }
+        });
         
         io.to(room.code).emit('newGameStarting', {
             gameState: getSafeGameState(room, null),
