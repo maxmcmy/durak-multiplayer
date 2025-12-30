@@ -450,6 +450,28 @@
             margin-left: -10px;
         }
 
+        /* Player voting status badge */
+        .vote-badge {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            background: #007bff;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: bold;
+            z-index: 10;
+        }
+
+        .vote-badge.voted-yes {
+            background: #28a745;
+        }
+
+        .vote-badge.voted-no {
+            background: #dc3545;
+        }
+
         /* Larger cards for much better visibility */
         .card {
             width: 60px;
@@ -620,6 +642,77 @@
             height: 95px;
         }
 
+        /* End Attack Voting Status */
+        .end-attack-voting {
+            position: absolute;
+            bottom: 85px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 15px 25px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+            z-index: 15;
+            min-width: 300px;
+            text-align: center;
+        }
+
+        .voting-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .voting-progress {
+            display: flex;
+            justify-content: space-around;
+            margin: 10px 0;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .vote-indicator {
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 0.9em;
+            background: #f0f0f0;
+        }
+
+        .vote-indicator.yes {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .vote-indicator.no {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .vote-indicator.pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .voting-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 10px;
+        }
+
+        .voting-buttons button {
+            padding: 8px 20px;
+            font-size: 0.95em;
+        }
+
+        .button-yes {
+            background: linear-gradient(135deg, #28a745 0%, #218838 100%);
+        }
+
+        .button-no {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        }
+
         /* Bottom Controls */
         .bottom-controls {
             display: flex;
@@ -779,7 +872,7 @@
             color: #333;
         }
 
-        .voting-buttons {
+        .voting-modal .voting-buttons {
             display: flex;
             gap: 20px;
             justify-content: center;
@@ -964,6 +1057,15 @@
             <div id="winnersList"></div>
         </div>
         
+        <div id="endAttackVoting" class="end-attack-voting hidden">
+            <div class="voting-title">🗳️ Vote to End Attack</div>
+            <div id="votingProgress" class="voting-progress"></div>
+            <div id="myVoteButtons" class="voting-buttons">
+                <button class="button-yes" onclick="voteEndAttack(true)">✓ End</button>
+                <button class="button-no" onclick="voteEndAttack(false)">✗ Continue</button>
+            </div>
+        </div>
+        
         <div class="game-table">
             <!-- 2-player layout -->
             <div id="twoPlayerLayout" class="game-area hidden">
@@ -1020,7 +1122,7 @@
         <div class="bottom-controls">
             <button id="takeBtn" onclick="takeCards()" disabled>Take Cards</button>
             <button id="deflectBtn" onclick="toggleDeflectMode()" disabled>Deflect</button>
-            <button id="endAttackBtn" onclick="endAttack()" disabled>End Attack</button>
+            <button id="endAttackBtn" onclick="initiateEndAttack()" disabled>Vote to End</button>
             <button onclick="leaveGame()" style="background: #dc3545;">Leave Game</button>
         </div>
     </div>
@@ -1077,6 +1179,7 @@
         let voteCountdown = null;
         let isSpectator = false;
         let selectedGameMode = 'classic';
+        let endAttackVoteStatus = {};
         
         // Connect to server
         function connectToServer() {
@@ -1156,10 +1259,28 @@
                 updateGameDisplay();
                 
                 if (data.allDefended && data.action === 'defend') {
-                    if (gameState.initialAttackerId === socket.id) {
-                        showMessage('All attacks defended! Continue or end turn.', 'info');
-                    }
+                    // All attacks defended - attackers can vote to end
+                    updateEndAttackVoteUI();
                 }
+            });
+            
+            socket.on('endAttackVote', (data) => {
+                // Update vote status
+                endAttackVoteStatus = data.currentVotes || [];
+                
+                if (data.vote) {
+                    showMessage(`${data.playerName} voted to end attack`, 'info');
+                } else {
+                    showMessage(`${data.playerName} wants to continue attacking`, 'info');
+                }
+                
+                updateEndAttackVoteUI();
+            });
+            
+            socket.on('endAttackVoteCancelled', (data) => {
+                endAttackVoteStatus = {};
+                hideEndAttackVoteUI();
+                showMessage(data.reason, 'info');
             });
             
             socket.on('attackDeflected', (data) => {
@@ -1183,6 +1304,7 @@
             socket.on('cardsTaken', (data) => {
                 gameState = data.gameState;
                 hideThrowInTimer();
+                hideEndAttackVoteUI();
                 updateGameDisplay();
                 showMessage(`Cards taken! (${data.totalCards} total)`, 'info');
             });
@@ -1190,6 +1312,7 @@
             socket.on('attackEnded', (data) => {
                 gameState = data.gameState;
                 deflectMode = false;
+                hideEndAttackVoteUI();
                 updateGameDisplay();
             });
             
@@ -1201,6 +1324,7 @@
             socket.on('gameOver', (data) => {
                 gameState.gameState = 'voting';
                 hideThrowInTimer();
+                hideEndAttackVoteUI();
                 updateGameDisplay();
                 showVotingModal(data);
             });
@@ -1213,6 +1337,7 @@
                 gameState = data.gameState;
                 isSpectator = false;
                 hideVotingModal();
+                hideEndAttackVoteUI();
                 showMessage(`New round starting! ${data.yesVotes} players voted yes.`, 'success');
                 
                 setTimeout(() => {
@@ -1243,6 +1368,99 @@
             socket.on('playerDisconnected', (data) => {
                 showMessage(`${data.playerName} disconnected`, 'error');
             });
+        }
+        
+        // Vote to end attack
+        function voteEndAttack(vote) {
+            if (!socket || isSpectator) return;
+            socket.emit('voteEndAttack', vote);
+            
+            // Hide buttons after voting
+            const buttons = document.getElementById('myVoteButtons');
+            if (buttons) {
+                buttons.classList.add('hidden');
+            }
+        }
+        
+        // Initiate end attack voting
+        function initiateEndAttack() {
+            if (!socket || isSpectator) return;
+            
+            // Check if we can vote to end
+            if (gameState && gameState.battlefield && 
+                gameState.battlefield.length > 0 && 
+                gameState.battlefield.every(pair => pair.defense)) {
+                voteEndAttack(true);
+            }
+        }
+        
+        // Update end attack voting UI
+        function updateEndAttackVoteUI() {
+            if (!gameState || gameState.gameState !== 'playing') {
+                hideEndAttackVoteUI();
+                return;
+            }
+            
+            // Check if voting is relevant
+            const canVote = gameState.currentDefenderId !== socket.id &&
+                           !isSpectator &&
+                           gameState.battlefield &&
+                           gameState.battlefield.length > 0 &&
+                           gameState.battlefield.every(pair => pair.defense);
+            
+            if (!canVote) {
+                hideEndAttackVoteUI();
+                return;
+            }
+            
+            // Show voting UI
+            const votingDiv = document.getElementById('endAttackVoting');
+            votingDiv.classList.remove('hidden');
+            
+            // Update voting progress
+            const progressDiv = document.getElementById('votingProgress');
+            progressDiv.innerHTML = '';
+            
+            const voters = gameState.players.filter(p => 
+                p.isActive && !p.hasWon && !p.isSpectator && 
+                p.id !== gameState.currentDefenderId
+            );
+            
+            voters.forEach(voter => {
+                const voteDiv = document.createElement('div');
+                voteDiv.className = 'vote-indicator';
+                
+                // Check if this player has voted
+                const hasVoted = gameState.endAttackVotes && 
+                               gameState.endAttackVotes.some(v => v[0] === voter.id);
+                
+                if (hasVoted) {
+                    const vote = gameState.endAttackVotes.find(v => v[0] === voter.id)[1];
+                    voteDiv.className += vote ? ' yes' : ' no';
+                    voteDiv.textContent = `${voter.name}: ${vote ? '✓' : '✗'}`;
+                } else {
+                    voteDiv.className += ' pending';
+                    voteDiv.textContent = `${voter.name}: ...`;
+                }
+                
+                progressDiv.appendChild(voteDiv);
+            });
+            
+            // Show/hide vote buttons based on whether we've voted
+            const myVote = gameState.endAttackVotes && 
+                          gameState.endAttackVotes.find(v => v[0] === socket.id);
+            const buttons = document.getElementById('myVoteButtons');
+            if (myVote) {
+                buttons.classList.add('hidden');
+            } else {
+                buttons.classList.remove('hidden');
+            }
+        }
+        
+        // Hide end attack voting UI
+        function hideEndAttackVoteUI() {
+            document.getElementById('endAttackVoting').classList.add('hidden');
+            endAttackVoteStatus = {};
         }
         
         // Select game mode
@@ -1542,6 +1760,7 @@
             const slot = document.createElement('div');
             slot.className = 'player-slot';
             slot.id = `player-${player.id}`;
+            slot.style.position = 'relative';
             
             if (isCurrentPlayer) {
                 slot.classList.add('current-player');
@@ -1674,7 +1893,7 @@
                 }
             }
             
-            // Update each player's display
+            // Update each player's display with vote badges
             gameState.players.forEach(player => {
                 if (player.isSpectator) return; // Don't show spectators in game
                 
@@ -1684,6 +1903,10 @@
                 // Clear and update classes
                 slot.classList.remove('active-attacker', 'defender', 'can-attack', 'winner', 'spectator');
                 
+                // Remove old vote badge if exists
+                const oldBadge = slot.querySelector('.vote-badge');
+                if (oldBadge) oldBadge.remove();
+                
                 if (player.hasWon) {
                     slot.classList.add('winner');
                 } else if (player.isDefender) {
@@ -1692,6 +1915,20 @@
                     slot.classList.add('active-attacker');
                 } else if (player.canAttack) {
                     slot.classList.add('can-attack');
+                }
+                
+                // Add vote badge if player has voted to end attack
+                if (player.votedEndAttack !== null && player.votedEndAttack !== undefined) {
+                    const badge = document.createElement('div');
+                    badge.className = 'vote-badge';
+                    if (player.votedEndAttack === true) {
+                        badge.classList.add('voted-yes');
+                        badge.textContent = '✓';
+                    } else if (player.votedEndAttack === false) {
+                        badge.classList.add('voted-no');
+                        badge.textContent = '✗';
+                    }
+                    slot.appendChild(badge);
                 }
                 
                 // Update cards
@@ -1745,6 +1982,9 @@
             
             // Update winners display
             updateWinnersDisplay();
+            
+            // Update end attack voting UI
+            updateEndAttackVoteUI();
         }
         
         function createCard(card, index) {
@@ -1910,12 +2150,11 @@
                 }
             }
             
-            // Only initial attacker can end attack
-            if (gameState.initialAttackerId === socket.id && gameState.battlefield && gameState.battlefield.length > 0) {
-                if (gameState.gamePhase === 'attacking' || 
-                    (gameState.gamePhase === 'defending' && gameState.battlefield.every(pair => pair.defense))) {
-                    endAttackBtn.disabled = false;
-                }
+            // Any attacker can vote to end if all attacks are defended
+            if (gameState.currentDefenderId !== socket.id && gameState.battlefield && 
+                gameState.battlefield.length > 0 && gameState.battlefield.every(pair => pair.defense)) {
+                endAttackBtn.disabled = false;
+                endAttackBtn.textContent = 'Vote to End';
             }
         }
         
@@ -2007,11 +2246,6 @@
                 showMessage('Click a card with the same rank to deflect!', 'info');
             }
             updateGameDisplay();
-        }
-        
-        function endAttack() {
-            if (!socket || isSpectator) return;
-            socket.emit('endAttack');
         }
         
         function finishThrowIn() {
