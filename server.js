@@ -174,7 +174,10 @@ function createRoom(roomCode, creatorId, creatorName, maxPlayers = 4, gameMode =
         // Voting system
         playAgainVotes: new Map(),
         voteTimer: null,
-        voteDeadline: null
+        voteDeadline: null,
+        // Attack end voting system
+        endAttackVotes: new Map(),
+        endAttackVoters: [] // List of players who can vote to end attack
     };
     
     gameRooms.set(roomCode, room);
@@ -216,6 +219,54 @@ function getAttackers(room) {
     );
 }
 
+// Get all players who can vote to end attack
+function getEndAttackVoters(room) {
+    if (!room.currentDefenderId) return [];
+    return room.players.filter(p => 
+        p.isActive && 
+        !p.hasWon && 
+        !p.isSpectator &&
+        p.id !== room.currentDefenderId
+    );
+}
+
+// Clear end attack votes
+function clearEndAttackVotes(room) {
+    room.endAttackVotes.clear();
+    room.endAttackVoters = [];
+}
+
+// Check if all attackers have voted to end
+function checkEndAttackVotes(room) {
+    const voters = getEndAttackVoters(room);
+    const requiredVotes = voters.length;
+    
+    if (requiredVotes === 0) return false;
+    
+    let yesVotes = 0;
+    let noVotes = 0;
+    
+    voters.forEach(voter => {
+        const vote = room.endAttackVotes.get(voter.id);
+        if (vote === true) yesVotes++;
+        else if (vote === false) noVotes++;
+    });
+    
+    // If anyone voted no, cancel all votes and continue
+    if (noVotes > 0) {
+        clearEndAttackVotes(room);
+        return false;
+    }
+    
+    // If everyone voted yes, end attack
+    if (yesVotes === requiredVotes) {
+        clearEndAttackVotes(room);
+        return true;
+    }
+    
+    return false;
+}
+
 // Start a game in a room - Updated to use game mode
 function startGame(roomCode) {
     const room = gameRooms.get(roomCode);
@@ -233,6 +284,7 @@ function startGame(roomCode) {
     room.gamePhase = 'attacking';
     room.winners = [];
     room.playAgainVotes.clear();
+    clearEndAttackVotes(room);
     
     // Set player positions (clockwise order) - only for non-spectators
     activePlayers.forEach((player, index) => {
@@ -327,6 +379,7 @@ function resetRoomForNewGame(room) {
     room.winners = [];
     room.playerOrder = [];
     room.playAgainVotes.clear();
+    clearEndAttackVotes(room);
     room.roundNumber++;
     // Game mode persists between rounds
     
@@ -373,6 +426,9 @@ function getSafeGameState(room, playerId) {
         roundNumber: room.roundNumber,
         voteDeadline: room.voteDeadline,
         playAgainVotes: Array.from(room.playAgainVotes.entries()),
+        // Add end attack voting info
+        endAttackVotes: Array.from(room.endAttackVotes.entries()),
+        endAttackVoters: room.endAttackVoters || [],
         players: room.players.map(p => ({
             id: p.id,
             name: p.name,
@@ -388,7 +444,9 @@ function getSafeGameState(room, playerId) {
             votedPlayAgain: p.votedPlayAgain,
             isInitialAttacker: p.id === room.initialAttackerId,
             isDefender: p.id === room.currentDefenderId,
-            canAttack: room.additionalAttackers.includes(p.id) || p.id === room.initialAttackerId
+            canAttack: room.additionalAttackers.includes(p.id) || p.id === room.initialAttackerId,
+            // Add voting status
+            votedEndAttack: room.endAttackVotes.has(p.id) ? room.endAttackVotes.get(p.id) : null
         }))
     };
     return safeRoom;
@@ -554,6 +612,11 @@ io.on('connection', (socket) => {
                 room.playAgainVotes.delete(playerId);
             }
             
+            // Clear end attack vote if they had voted
+            if (room.endAttackVotes.has(playerId)) {
+                room.endAttackVotes.delete(playerId);
+            }
+            
             // Notify other players
             io.to(roomCode).emit('playerLeft', {
                 playerId: playerId,
@@ -645,6 +708,56 @@ io.on('connection', (socket) => {
         }
     });
     
+    // Vote to end attack
+    socket.on('voteEndAttack', (vote) => {
+        const roomCode = playerRooms.get(socket.id);
+        const room = gameRooms.get(roomCode);
+        
+        if (!room || room.gameState !== 'playing') return;
+        
+        const player = findPlayerBySocketId(room, socket.id);
+        if (!player || player.isSpectator) return;
+        
+        // Check if player can vote (not the defender)
+        if (player.id === room.currentDefenderId) return;
+        
+        // Check if there are cards on the battlefield
+        if (room.battlefield.length === 0) return;
+        
+        // Check if all attacks are defended (required for ending)
+        if (!room.battlefield.every(pair => pair.defense)) return;
+        
+        // Store vote
+        room.endAttackVotes.set(player.id, vote);
+        
+        // Get list of players who can vote
+        const voters = getEndAttackVoters(room);
+        room.endAttackVoters = voters.map(v => v.id);
+        
+        // Notify all players of the vote
+        io.to(roomCode).emit('endAttackVote', {
+            playerId: player.id,
+            playerName: player.name,
+            vote: vote,
+            votesNeeded: voters.length,
+            currentVotes: Array.from(room.endAttackVotes.entries())
+        });
+        
+        // If vote is no, immediately cancel all votes and continue
+        if (!vote) {
+            clearEndAttackVotes(room);
+            io.to(roomCode).emit('endAttackVoteCancelled', {
+                reason: `${player.name} voted to continue attacking`
+            });
+            return;
+        }
+        
+        // Check if we have enough votes to end
+        if (checkEndAttackVotes(room)) {
+            completeSuccessfulDefense(room);
+        }
+    });
+    
     // Play a card (attack only - defend is now separate)
     socket.on('playCard', (data) => {
         const { cardIndex } = data;
@@ -660,6 +773,9 @@ io.on('connection', (socket) => {
         
         // Ensure trump status is correct
         card.isTrump = card.suit === room.trumpSuit;
+        
+        // Playing a card clears any end attack votes
+        clearEndAttackVotes(room);
         
         // Handle attack (initial attacker or additional attackers can attack at ANY time)
         if ((room.initialAttackerId === player.id || room.additionalAttackers.includes(player.id)) 
@@ -772,6 +888,9 @@ io.on('connection', (socket) => {
         
         const player = findPlayerBySocketId(room, socket.id);
         if (!player || cardIndex >= player.hand.length) return;
+        
+        // Defending clears any end attack votes
+        clearEndAttackVotes(room);
         
         // Check if target attack exists and is undefended
         if (targetIndex >= room.battlefield.length || targetIndex < 0) return;
@@ -890,6 +1009,9 @@ io.on('connection', (socket) => {
         // Stay in defending phase
         room.gamePhase = 'defending';
         
+        // Clear any end attack votes since the situation changed
+        clearEndAttackVotes(room);
+        
         // Notify all players
         room.players.forEach(p => {
             io.to(p.id).emit('attackDeflected', {
@@ -913,6 +1035,9 @@ io.on('connection', (socket) => {
         if (room.currentDefenderId !== socket.id) return;
         
         const defender = findPlayerBySocketId(room, socket.id);
+        
+        // Clear any end attack votes
+        clearEndAttackVotes(room);
         
         // Calculate how many cards the defender will take initially
         const initialDefenderCards = defender.hand.length;
@@ -975,7 +1100,7 @@ io.on('connection', (socket) => {
         completeTakeCards(room);
     });
     
-    // End attack
+    // End attack (deprecated - kept for backward compatibility)
     socket.on('endAttack', () => {
         const roomCode = playerRooms.get(socket.id);
         const room = gameRooms.get(roomCode);
@@ -983,15 +1108,12 @@ io.on('connection', (socket) => {
         if (!room || room.gameState !== 'playing') return;
         
         const player = findPlayerBySocketId(room, socket.id);
-        if (!player || room.initialAttackerId !== player.id) return;
+        if (!player || player.isSpectator) return;
         
-        // Can end attack if:
-        // 1. All attacks are defended (defender succeeded)
-        // 2. Attacker chooses to end during attacking phase
-        if (room.gamePhase === 'attacking' || 
-            (room.battlefield.length > 0 && room.battlefield.every(pair => pair.defense))) {
-            
-            completeSuccessfulDefense(room);
+        // Convert to vote instead
+        if (player.id !== room.currentDefenderId && room.battlefield.length > 0 && 
+            room.battlefield.every(pair => pair.defense)) {
+            socket.emit('voteEndAttack', true);
         }
     });
     
@@ -1059,6 +1181,7 @@ function completeTakeCards(room) {
     room.battlefield = [];
     room.throwInCards = [];
     room.validThrowInRanks.clear();
+    clearEndAttackVotes(room);
     
     // Draw cards for all players who attacked
     const initialAttacker = room.players.find(p => p.id === room.initialAttackerId);
@@ -1110,6 +1233,7 @@ function completeSuccessfulDefense(room) {
     // Clear battlefield
     room.battlefield = [];
     room.throwInCards = [];
+    clearEndAttackVotes(room);
     
     // Draw cards for all active players in clockwise order
     const defender = room.players.find(p => p.id === room.currentDefenderId);
@@ -1213,6 +1337,11 @@ function checkForWinner(room, player) {
             if (nextAttacker) {
                 room.initialAttackerId = nextAttacker.id;
             }
+        }
+        
+        // Clear their vote if they had one
+        if (room.endAttackVotes.has(player.id)) {
+            room.endAttackVotes.delete(player.id);
         }
         
         updatePlayerOrder(room);
